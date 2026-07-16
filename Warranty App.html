@@ -1201,7 +1201,7 @@ function defaultOrder(){
     invoiceAddress: DEFAULT_ADDRESS,
     shippingAddress: DEFAULT_ADDRESS,
     customer: '',
-    items: [ {machineNo:'', machineType:'', articleNo:'', description:'', qty:'', qtyUnit:'pcs', itemDesc:'', image:null} ],
+    items: [ {machineNo:'', machineType:'', articleNo:'', description:'', qty:1, qtyUnit:'pcs', itemDesc:'', image:null} ],
     comments: ''
   };
 }
@@ -3096,7 +3096,7 @@ function escAttr(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace
 document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('btnAddRow').onclick = ()=>{
     if(order.items.length >= MAX_ITEMS) return;
-    order.items.push({machineNo:'',machineType:'',articleNo:'',description:'',qty:'',qtyUnit:'pcs',itemDesc:'',image:null});
+    order.items.push({machineNo:'',machineType:'',articleNo:'',description:'',qty:1,qtyUnit:'pcs',itemDesc:'',image:null});
     renderItems();
   };
 });
