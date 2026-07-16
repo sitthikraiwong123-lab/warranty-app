@@ -1120,7 +1120,17 @@ function buildPrintHtml(ord){
     return `<img src="${img.src}" style="max-width:100%;max-height:50mm;width:auto;height:auto;display:inline-block;vertical-align:middle;">`;
   }
   function articleHdr(i){ return `<td class="part-hdr">Article No</td>`; }
-  function articleVal(i){ const it = photoItems[i]; return `<td class="part-val">${escHtml(it && it.articleNo ? String(it.articleNo) : '-')}</td>`; }
+  function articleVal(i){
+    const it = photoItems[i];
+    let val = '-';
+    if(it && Array.isArray(it.setArticles) && it.setArticles.length){
+      // Companion set was accepted → list every code in the set.
+      val = it.setArticles.map(a=>'#'+a).join(', ');
+    } else if(it && it.articleNo){
+      val = String(it.articleNo);
+    }
+    return `<td class="part-val">${escHtml(val)}</td>`;
+  }
 
   return `
   <div class="pdoc">
@@ -2532,6 +2542,12 @@ function maybeSuggestCompanions(idx){
   showCompanionPrompt(trigger, comps).then(yes=>{
     if(yes){
       addCompanionRows(idx, comps);
+      // Remember the whole set on the main part so the PDF's Article No cell can
+      // list every code in the set (e.g. #46694, #35414, …) instead of only the
+      // main one. Only set when accepted — declining leaves the single code.
+      if(set && Array.isArray(set.parts) && set.parts.length){
+        order.items[idx].setArticles = set.parts.map(p=>String(p||'').trim()).filter(Boolean);
+      }
       applyCompanionSetImage(idx, set); // combined image → main part's photo
     }
   });
