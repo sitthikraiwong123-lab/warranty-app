@@ -285,6 +285,25 @@ input,select,textarea{font-family:inherit;font-size:14px;}
 .btn-outline:hover{background:#fff5f4;border-color:var(--red);}
 .btn-ico{font-size:15px;line-height:1;display:inline-block;}
 .topbar-actions .btn{padding:7px 11px;font-size:12.5px;}
+/* ☰ menu: the top-bar actions collapse into a dropdown. Anchored to .topbar
+   (sticky counts as positioned, so it's the containing block). Deliberately NOT
+   registered with modalOpened(): an item's own handler opens its modal
+   synchronously, and consumeModalHistory()'s async history.back() would race
+   that pushState and unbalance _modalDepth. It dismisses via Esc / tap-outside
+   / picking an item instead. */
+.btn-menu{font-size:16px;line-height:1;}
+.top-menu{position:absolute;top:100%;right:14px;margin-top:6px;z-index:60;
+  background:#fff;border:1px solid var(--border);border-radius:10px;
+  box-shadow:0 6px 20px rgba(0,0,0,.16);min-width:186px;padding:6px;
+  display:none;flex-direction:column;gap:2px;}
+.top-menu.open{display:flex;}
+.tm-item{display:flex;align-items:center;gap:9px;width:100%;justify-content:flex-start;
+  text-align:left;background:none;border:none;border-radius:7px;padding:12px;
+  font-size:13.5px;font-weight:600;color:var(--dark);cursor:pointer;
+  -webkit-tap-highlight-color:transparent;}
+.tm-item:hover{background:#f3f3f4;}
+.tm-item:active{background:#e9e9ea;}
+.tm-item:disabled{opacity:.45;cursor:not-allowed;}
 /* add-row: clear full-width dashed accent action */
 .btn-add-row{width:100%;justify-content:center;border:1.5px dashed var(--red);color:var(--red);
   background:#fff;padding:11px 14px;border-radius:10px;font-weight:700;margin-top:4px;}
@@ -605,10 +624,13 @@ table.pphoto tr td:last-child{ border-right:none !important; }
     <div><h1>Export / Warranty Order Form</h1><div style="font-size:10.5px;color:var(--gray);margin-top:2px;letter-spacing:.03em;">v2.7.5 · 05-Jul-2026</div></div>
   </div>
   <div class="topbar-actions">
-    <button class="btn" id="btnHistory">ประวัติ</button>
-    <button class="btn" id="lookupSyncRefresh" title="ซิงค์ฐานข้อมูล Machine/Part">⟳ ซิงค์</button>
-    <button class="btn" id="btnViewDb" title="ดูข้อมูล Database ที่ซิงค์มา">📋 ดู DB</button>
-    <button class="btn" id="btnNew">+ ใหม่</button>
+    <button class="btn btn-menu" id="btnMenu" aria-label="เมนู" aria-haspopup="true" aria-expanded="false" aria-controls="topMenu">☰</button>
+    <div class="top-menu" id="topMenu" role="menu" aria-labelledby="btnMenu">
+      <button class="tm-item" id="btnHistory" role="menuitem">🕘 ประวัติ</button>
+      <button class="tm-item" id="lookupSyncRefresh" role="menuitem" title="ซิงค์ฐานข้อมูล Machine/Part">⟳ ซิงค์</button>
+      <button class="tm-item" id="btnViewDb" role="menuitem" title="ดูข้อมูล Database ที่ซิงค์มา">📋 ดู DB</button>
+      <button class="tm-item" id="btnNew" role="menuitem">＋ ใหม่</button>
+    </div>
   </div>
 </div>
 
@@ -3890,7 +3912,41 @@ window.addEventListener('popstate', ()=>{
   if(_modalDepth>0){ _modalDepth--; closeTopmostModalDom(); }
 });
 window.addEventListener('keydown', (e)=>{
-  if(e.key==='Escape' && _modalDepth>0){ e.preventDefault(); userDismissTopModal(); }
+  if(e.key!=='Escape') return;
+  if(closeTopMenu()){ e.preventDefault(); return; }   // ☰ menu is the lightest layer
+  if(_modalDepth>0){ e.preventDefault(); userDismissTopModal(); }
+});
+
+/* ---- ☰ top-bar menu (ประวัติ / ซิงค์ / ดู DB / ใหม่) ----
+   The items keep their original ids, so their existing handlers are untouched. */
+function closeTopMenu(){
+  const m = document.getElementById('topMenu');
+  if(!m || !m.classList.contains('open')) return false;
+  m.classList.remove('open');
+  const b = document.getElementById('btnMenu');
+  if(b) b.setAttribute('aria-expanded','false');
+  return true;
+}
+function toggleTopMenu(){
+  const m = document.getElementById('topMenu');
+  if(!m) return;
+  if(closeTopMenu()) return;
+  m.classList.add('open');
+  const b = document.getElementById('btnMenu');
+  if(b) b.setAttribute('aria-expanded','true');
+}
+document.addEventListener('DOMContentLoaded', ()=>{
+  const b = document.getElementById('btnMenu');
+  const m = document.getElementById('topMenu');
+  if(!b || !m) return;
+  b.onclick = toggleTopMenu;
+  // Capture: hide the menu BEFORE the item's own onclick opens its modal.
+  m.addEventListener('click', (e)=>{ if(e.target.closest('.tm-item')) closeTopMenu(); }, true);
+  document.addEventListener('click', (e)=>{
+    if(!m.classList.contains('open')) return;
+    if(e.target.closest('#topMenu') || e.target.closest('#btnMenu')) return;
+    closeTopMenu();
+  });
 });
 
 /* ---------------- Tab-scoped editor session ----------------
