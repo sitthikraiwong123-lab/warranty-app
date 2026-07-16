@@ -2988,14 +2988,14 @@ function renderItems(){
     if(it.locked){
       // Companion part added via "เบิกคู่" — read-only, not editable, but removable.
       row.innerHTML = `
-        <div class="item-row-head"><span class="locked-badge">🔒 พาร์ทแนะนำ (ล็อก)</span><button type="button" class="btn-del-row" data-idx="${idx}">ลบ</button></div>
+        <div class="item-row-head"><span class="locked-badge">🔒 พาร์ทแนะนำ (แก้ Qty ได้)</span><button type="button" class="btn-del-row" data-idx="${idx}">ลบ</button></div>
         <div class="item-grid">
           <label class="fld-inline"><span class="fld-cap">Machine No*</span><input type="text" value="${escAttr(it.machineNo)}" readonly tabindex="-1"></label>
           <label class="fld-inline"><span class="fld-cap">Machine Type*</span><input type="text" value="${escAttr(it.machineType)}" readonly tabindex="-1"></label>
           <label class="fld-inline"><span class="fld-cap">Article No</span><input type="text" value="${escAttr(it.articleNo)}" readonly tabindex="-1"></label>
           <div class="pname-qty-row">
             <label class="fld-stack pname-fld"><span class="fld-cap">Part Name</span><input type="text" value="${escAttr(it.description)}" readonly tabindex="-1"></label>
-            <label class="fld-stack qty-fld"><span class="fld-cap">Qty</span><div class="qty-inputs"><input type="number" value="${escAttr(it.qty)}" readonly tabindex="-1"><select disabled tabindex="-1"><option value="pcs"${it.qtyUnit!=='set'?' selected':''}>pcs</option><option value="set"${it.qtyUnit==='set'?' selected':''}>set</option></select></div></label>
+            <label class="fld-stack qty-fld"><span class="fld-cap">Qty</span><div class="qty-inputs"><input type="number" class="f-qty" data-idx="${idx}" value="${escAttr(it.qty)}" min="0"><select class="f-qtyunit" data-idx="${idx}"><option value="pcs"${it.qtyUnit!=='set'?' selected':''}>pcs</option><option value="set"${it.qtyUnit==='set'?' selected':''}>set</option></select></div></label>
           </div>
           <label class="fld-stack"><span class="fld-cap">Description</span><input type="text" value="${escAttr(it.itemDesc)}" placeholder="e.g. damaged at left side" readonly tabindex="-1"></label>
         </div>`;
