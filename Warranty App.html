@@ -330,6 +330,18 @@ details.addr-details summary{cursor:pointer;font-size:12.5px;color:var(--gray);f
 .fld-inline{display:flex;align-items:center;gap:10px;}
 .fld-inline .fld-cap{flex-shrink:0;width:98px;}
 .fld-inline > input,.fld-inline .ac-wrap,.fld-inline .mt-wrap{flex:1;min-width:0;}
+/* 👁 "ประวัติการเบิก" — sits BESIDE .ac-wrap (a sibling, never inside it) so the
+   absolutely-positioned .ac-list dropdown stays the width of the input alone.
+   38px matches the input height; the app's controls are ~38px throughout, so a
+   44px target here would sit taller than the field it belongs to. */
+.btn-usage{flex-shrink:0;width:38px;height:38px;padding:0;border:1px solid var(--border);
+  border-radius:9px;background:#fff;color:var(--gray);font-size:15px;line-height:1;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  transition:border-color .15s,color .15s,background .15s,transform .05s;
+  -webkit-tap-highlight-color:transparent;}
+.btn-usage:hover:not(:disabled){border-color:var(--red);background:#fff5f4;}
+.btn-usage:active:not(:disabled){transform:scale(.94);}
+.btn-usage:disabled{opacity:.4;cursor:not-allowed;}
 /* Description keeps the caption-above-field stacked layout, full width */
 .fld-stack{display:flex;flex-direction:column;gap:3px;}
 /* Part Name (flex) + Qty (compact) share one line; Description sits full-width below */
@@ -2208,7 +2220,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
             <label>Predict words (คำค้นหา)</label>
             <div class="epm-alias-tags">${aliasTags}</div>
             <div class="epm-alias-add"><input type="text" class="epm-alias-input" placeholder="เพิ่มคำค้นหา"><button type="button" class="btn epm-alias-addbtn">เพิ่ม</button></div>
-            <button type="button" class="btn epm-usage-open" style="font-size:12px;">📍 ประวัติการเบิก (ใช้ไปที่ไหนบ้าง)</button>
+            <button type="button" class="btn epm-usage-open" style="font-size:12px;">👁 ประวัติการเบิก (ใช้ไปที่ไหนบ้าง)</button>
             <button type="button" class="btn epm-restore-open" style="font-size:12px;">🕘 ประวัติ / กู้คืนข้อมูล</button>
             <button type="button" class="btn btn-danger epm-delete" style="font-size:12px;">🗑 ลบอะไหล่นี้ (ย้ายไปถังขยะ)</button>
           </div>
@@ -2239,43 +2251,12 @@ document.addEventListener('DOMContentLoaded', ()=>{
           renderEdit();
         }catch(err){ flashStatus('เตรียมรูปไม่สำเร็จ'); }
       };
-      ov.querySelector('.epm-usage-open').onclick = renderUsage;
+      ov.querySelector('.epm-usage-open').onclick = ()=>openUsageModal(origArticleNo);
       ov.querySelector('.epm-restore-open').onclick = renderRestore;
       ov.querySelector('.epm-delete').onclick = doDelete;
       ov.querySelector('.epm-save').onclick = save;
     }
 
-    // Where has this part been requisitioned to? Reads the PartUsage ledger on
-    // demand (never synced wholesale — it grows with every export).
-    async function renderUsage(){
-      ov.innerHTML = `<div class="edit-part-dialog">
-        <div class="epm-head"><span>ประวัติการเบิก #${escDb(origArticleNo)}</span><button type="button" class="epm-x">✕</button></div>
-        <div class="epm-body"><div class="db-empty">กำลังโหลด...</div></div>
-        <div class="epm-actions"><button type="button" class="btn epm-back">← กลับไปแก้ไข</button></div>
-      </div>`;
-      ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
-      ov.querySelector('.epm-back').onclick = renderEdit;
-      const bodyEl = ov.querySelector('.epm-body');
-      let rows=[];
-      try{ const res=await lookupApiCall('getPartUsage',{articleNo:origArticleNo, limit:100}); rows=res.rows||[]; }
-      catch(err){ const m=String(err.message||err); bodyEl.innerHTML='<div class="db-status-line err">โหลดไม่สำเร็จ: '+escDb(m)+(m.includes('Unknown action')?' → deploy Code.gs ใหม่':'')+'</div>'; return; }
-      if(!rows.length){ bodyEl.innerHTML='<div class="db-empty">ยังไม่มีประวัติการเบิก<br><span style="font-size:11px;">(บันทึกเมื่อกด “Export PDF → Email”)</span></div>'; return; }
-      const totalQty = rows.reduce((s,r)=>{ const n=parseFloat(r.Qty); return s + (isNaN(n)?0:n); }, 0);
-      bodyEl.innerHTML =
-        `<div class="epm-note">เบิกไปแล้ว <b>${rows.length}</b> ครั้ง · รวม <b>${totalQty}</b> ชิ้น/ชุด</div>` +
-        `<div class="epm-restore-list">` + rows.map(r=>{
-          const when = r.Timestamp ? new Date(r.Timestamp).toLocaleString('th-TH') : '-';
-          const machine = [r.MachineType, r.MachineNo].filter(Boolean).join(' · ') || '-';
-          const qty = [r.Qty, r.Unit].filter(v=>v!=='' && v!=null).join(' ');
-          return `<div class="epm-restore-card">
-            <div class="rc-meta">${escDb(when)} · ${escDb(r.Type||'-')}${r.RecordedBy?' · '+escDb(r.RecordedBy):''}</div>
-            <div><b>${escDb(r.Customer||'-')}</b></div>
-            <div>🖥 ${escDb(machine)}</div>
-            <div>จำนวน ${escDb(qty||'-')}${r.SetName?' · ชุด: '+escDb(r.SetName):''}</div>
-            ${r.Note?'<div style="color:var(--gray);">📝 '+escDb(r.Note)+'</div>':''}
-          </div>`;
-        }).join('') + `</div>`;
-    }
 
     // Soft delete: back up the whole row to the RecycleBin tab server-side, then
     // remove it from the live list. Recoverable from the ถังขยะ tab.
@@ -3031,6 +3012,64 @@ function bindTopFields(){
   custWrap.appendChild(buildComboBox(CUSTOMERS, order.customer, v=>{ order.customer = v; }, '- เลือกลูกค้า -'));
 }
 
+/* Renders the PartUsage ledger rows. Shared so the ledger looks identical
+   wherever it's shown (item-row 👁 button and the part editor). */
+function renderUsageRows(rows){
+  if(!rows.length){
+    return '<div class="db-empty">ยังไม่มีประวัติการเบิก<br><span style="font-size:11px;">' +
+      'ระบบเริ่มเก็บตั้งแต่ตอนกด “✉ Export PDF → Email” (ไม่ได้เก็บย้อนหลังใบเก่า)</span></div>';
+  }
+  const totalQty = rows.reduce((s,r)=>{ const n = parseFloat(r.Qty); return s + (isNaN(n)?0:n); }, 0);
+  return `<div class="epm-note">เบิกไปแล้ว <b>${rows.length}</b> ครั้ง · รวม <b>${totalQty}</b> ชิ้น/ชุด</div>` +
+    `<div class="epm-restore-list">` + rows.map(r=>{
+      const when = r.Timestamp ? new Date(r.Timestamp).toLocaleString('th-TH') : '-';
+      const machine = [r.MachineType, r.MachineNo].filter(Boolean).join(' · ') || '-';
+      const qty = [r.Qty, r.Unit].filter(v=>v!=='' && v!=null).join(' ');
+      return `<div class="epm-restore-card">
+        <div class="rc-meta">${escHtml(when)} · ${escHtml(r.Type||'-')}${r.RecordedBy?' · '+escHtml(r.RecordedBy):''}</div>
+        <div><b>${escHtml(r.Customer||'-')}</b></div>
+        <div>🖥 ${escHtml(machine)}</div>
+        <div>จำนวน ${escHtml(qty||'-')}${r.SetName?' · ชุด: '+escHtml(r.SetName):''}</div>
+        ${r.Note?'<div style="color:var(--gray);">📝 '+escHtml(r.Note)+'</div>':''}
+      </div>`;
+    }).join('') + `</div>`;
+}
+
+/* "ประวัติการเบิก" for one Article No — which customer / machine did this part
+   go to? Standalone (IIFE scope) so BOTH the item-row 👁 button and the part
+   editor can open it. It mounts its own .edit-part-modal, so opening it on top
+   of the edit form is safe: closeTopmostModalDom() dismisses the topmost one
+   first, leaving the edit form (and any unsaved photo) untouched underneath. */
+async function openUsageModal(articleNo){
+  const art = String(articleNo||'').trim();
+  if(!art){ flashStatus('ใส่ Article No ก่อน จึงจะดูประวัติการเบิกได้'); return; }
+  const ov = document.createElement('div');
+  ov.className = 'edit-part-modal open';
+  ov.innerHTML = `<div class="edit-part-dialog">
+    <div class="epm-head"><span>ประวัติการเบิก #${escHtml(art)}</span><button type="button" class="epm-x">✕</button></div>
+    <div class="epm-body"><div class="db-empty">กำลังโหลด...</div></div>
+    <div class="epm-actions"><button type="button" class="btn epm-close">ปิด</button></div>
+  </div>`;
+  ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
+  ov.querySelector('.epm-close').onclick = ()=>userDismissTopModal();
+  ov.addEventListener('click', e=>{ if(e.target===ov) userDismissTopModal(); });
+  document.body.appendChild(ov);
+  modalOpened();
+
+  const bodyEl = ov.querySelector('.epm-body');
+  let rows = [];
+  try{
+    const res = await lookupApiCall('getPartUsage', { articleNo: art, limit: 100 });
+    rows = res.rows || [];
+  }catch(err){
+    const m = String(err.message||err);
+    bodyEl.innerHTML = '<div class="db-status-line err">โหลดไม่สำเร็จ: ' + escHtml(m) +
+      (m.indexOf('Unknown action') >= 0 ? ' → ต้อง Deploy Code.gs ใหม่ (ยังไม่มี getPartUsage)' : '') + '</div>';
+    return;
+  }
+  bodyEl.innerHTML = renderUsageRows(rows);
+}
+
 /* ---------------- items table ---------------- */
 function renderItems(){
   const list = document.getElementById('itemsList');
@@ -3045,7 +3084,7 @@ function renderItems(){
         <div class="item-grid">
           <label class="fld-inline"><span class="fld-cap">Machine No*</span><input type="text" value="${escAttr(it.machineNo)}" readonly tabindex="-1"></label>
           <label class="fld-inline"><span class="fld-cap">Machine Type*</span><input type="text" value="${escAttr(it.machineType)}" readonly tabindex="-1"></label>
-          <label class="fld-inline"><span class="fld-cap">Article No</span><input type="text" value="${escAttr(it.articleNo)}" readonly tabindex="-1"></label>
+          <div class="fld-inline"><span class="fld-cap">Article No</span><input type="text" value="${escAttr(it.articleNo)}" readonly tabindex="-1"><button type="button" class="btn-usage f-usage" data-idx="${idx}" title="ดูประวัติการเบิก: พาร์ทนี้เคยเบิกให้ลูกค้า/เครื่องรุ่นไหน" aria-label="ดูประวัติการเบิกของพาร์ทนี้"${String(it.articleNo||'').trim()?'':' disabled'}>👁</button></div>
           <div class="pname-qty-row">
             <label class="fld-stack pname-fld"><span class="fld-cap">Part Name</span><input type="text" value="${escAttr(it.description)}" readonly tabindex="-1"></label>
             <label class="fld-stack qty-fld"><span class="fld-cap">Qty</span><div class="qty-inputs"><input type="number" class="f-qty" data-idx="${idx}" value="${escAttr(it.qty)}" min="0"><select class="f-qtyunit" data-idx="${idx}"><option value="pcs"${it.qtyUnit!=='set'?' selected':''}>pcs</option><option value="set"${it.qtyUnit==='set'?' selected':''}>set</option></select></div></label>
@@ -3058,7 +3097,7 @@ function renderItems(){
       <div class="item-grid">
         <label class="fld-inline"><span class="fld-cap">Machine No*</span><div class="ac-wrap"><input type="text" class="f-machineNo" data-idx="${idx}" value="${escAttr(it.machineNo)}" autocomplete="off"><div class="ac-list" id="machineAc${idx}"></div></div></label>
         <label class="fld-inline"><span class="fld-cap">Machine Type*</span><div class="mt-wrap" data-idx="${idx}"></div></label>
-        <label class="fld-inline"><span class="fld-cap">Article No</span><div class="ac-wrap"><input type="text" class="f-articleNo" data-idx="${idx}" value="${escAttr(it.articleNo)}" autocomplete="off"><div class="ac-list" id="partAc${idx}"></div></div></label>
+        <div class="fld-inline"><span class="fld-cap">Article No</span><div class="ac-wrap"><input type="text" class="f-articleNo" data-idx="${idx}" value="${escAttr(it.articleNo)}" autocomplete="off"><div class="ac-list" id="partAc${idx}"></div></div><button type="button" class="btn-usage f-usage" data-idx="${idx}" title="ดูประวัติการเบิก: พาร์ทนี้เคยเบิกให้ลูกค้า/เครื่องรุ่นไหน" aria-label="ดูประวัติการเบิกของพาร์ทนี้"${String(it.articleNo||'').trim()?'':' disabled'}>👁</button></div>
         <div class="pname-qty-row">
           <label class="fld-stack pname-fld"><span class="fld-cap">Part Name</span><div class="ac-wrap"><input type="text" class="f-description" data-idx="${idx}" value="${escAttr(it.description)}" autocomplete="off"><div class="ac-list" id="descAc${idx}"></div></div></label>
           <label class="fld-stack qty-fld"><span class="fld-cap">Qty</span><div class="qty-inputs"><input type="number" class="f-qty" data-idx="${idx}" value="${escAttr(it.qty)}" min="0"><select class="f-qtyunit" data-idx="${idx}"><option value="pcs"${it.qtyUnit!=='set'?' selected':''}>pcs</option><option value="set"${it.qtyUnit==='set'?' selected':''}>set</option></select></div></label>
@@ -3098,6 +3137,9 @@ function renderItems(){
     el.oninput = e=>{
       order.items[idx].articleNo = e.target.value;
       renderPartSuggestions(ac, idx, e.target.value);
+      // keep 👁 in step with the field — renderItems() doesn't re-run per keystroke
+      const ub = list.querySelector('.f-usage[data-idx="'+idx+'"]');
+      if(ub) ub.disabled = !String(e.target.value||'').trim();
     };
     el.onfocus = e=>renderPartSuggestions(ac, idx, e.target.value);
     el.onblur = ()=>{
@@ -3122,6 +3164,10 @@ function renderItems(){
   });
   // Qty (number) + unit (pcs/set) + free-text item description — plain fields,
   // no autocomplete, just mirror the value into the data model.
+  list.querySelectorAll('.f-usage').forEach(el=>{
+    const idx = +el.dataset.idx;
+    el.onclick = ()=>{ const it = order.items[idx]; openUsageModal(it && it.articleNo); };
+  });
   list.querySelectorAll('.f-qty').forEach(el=>{
     const idx = +el.dataset.idx;
     el.oninput = e=>{ order.items[idx].qty = e.target.value; };
