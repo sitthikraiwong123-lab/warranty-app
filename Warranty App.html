@@ -2208,6 +2208,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
             <label>Predict words (คำค้นหา)</label>
             <div class="epm-alias-tags">${aliasTags}</div>
             <div class="epm-alias-add"><input type="text" class="epm-alias-input" placeholder="เพิ่มคำค้นหา"><button type="button" class="btn epm-alias-addbtn">เพิ่ม</button></div>
+            <button type="button" class="btn epm-usage-open" style="font-size:12px;">📍 ประวัติการเบิก (ใช้ไปที่ไหนบ้าง)</button>
             <button type="button" class="btn epm-restore-open" style="font-size:12px;">🕘 ประวัติ / กู้คืนข้อมูล</button>
             <button type="button" class="btn btn-danger epm-delete" style="font-size:12px;">🗑 ลบอะไหล่นี้ (ย้ายไปถังขยะ)</button>
           </div>
@@ -2238,9 +2239,42 @@ document.addEventListener('DOMContentLoaded', ()=>{
           renderEdit();
         }catch(err){ flashStatus('เตรียมรูปไม่สำเร็จ'); }
       };
+      ov.querySelector('.epm-usage-open').onclick = renderUsage;
       ov.querySelector('.epm-restore-open').onclick = renderRestore;
       ov.querySelector('.epm-delete').onclick = doDelete;
       ov.querySelector('.epm-save').onclick = save;
+    }
+
+    // Where has this part been requisitioned to? Reads the PartUsage ledger on
+    // demand (never synced wholesale — it grows with every export).
+    async function renderUsage(){
+      ov.innerHTML = `<div class="edit-part-dialog">
+        <div class="epm-head"><span>ประวัติการเบิก #${escDb(origArticleNo)}</span><button type="button" class="epm-x">✕</button></div>
+        <div class="epm-body"><div class="db-empty">กำลังโหลด...</div></div>
+        <div class="epm-actions"><button type="button" class="btn epm-back">← กลับไปแก้ไข</button></div>
+      </div>`;
+      ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
+      ov.querySelector('.epm-back').onclick = renderEdit;
+      const bodyEl = ov.querySelector('.epm-body');
+      let rows=[];
+      try{ const res=await lookupApiCall('getPartUsage',{articleNo:origArticleNo, limit:100}); rows=res.rows||[]; }
+      catch(err){ const m=String(err.message||err); bodyEl.innerHTML='<div class="db-status-line err">โหลดไม่สำเร็จ: '+escDb(m)+(m.includes('Unknown action')?' → deploy Code.gs ใหม่':'')+'</div>'; return; }
+      if(!rows.length){ bodyEl.innerHTML='<div class="db-empty">ยังไม่มีประวัติการเบิก<br><span style="font-size:11px;">(บันทึกเมื่อกด “Export PDF → Email”)</span></div>'; return; }
+      const totalQty = rows.reduce((s,r)=>{ const n=parseFloat(r.Qty); return s + (isNaN(n)?0:n); }, 0);
+      bodyEl.innerHTML =
+        `<div class="epm-note">เบิกไปแล้ว <b>${rows.length}</b> ครั้ง · รวม <b>${totalQty}</b> ชิ้น/ชุด</div>` +
+        `<div class="epm-restore-list">` + rows.map(r=>{
+          const when = r.Timestamp ? new Date(r.Timestamp).toLocaleString('th-TH') : '-';
+          const machine = [r.MachineType, r.MachineNo].filter(Boolean).join(' · ') || '-';
+          const qty = [r.Qty, r.Unit].filter(v=>v!=='' && v!=null).join(' ');
+          return `<div class="epm-restore-card">
+            <div class="rc-meta">${escDb(when)} · ${escDb(r.Type||'-')}${r.RecordedBy?' · '+escDb(r.RecordedBy):''}</div>
+            <div><b>${escDb(r.Customer||'-')}</b></div>
+            <div>🖥 ${escDb(machine)}</div>
+            <div>จำนวน ${escDb(qty||'-')}${r.SetName?' · ชุด: '+escDb(r.SetName):''}</div>
+            ${r.Note?'<div style="color:var(--gray);">📝 '+escDb(r.Note)+'</div>':''}
+          </div>`;
+        }).join('') + `</div>`;
     }
 
     // Soft delete: back up the whole row to the RecycleBin tab server-side, then
@@ -2541,12 +2575,14 @@ function maybeSuggestCompanions(idx){
   const set = getCompanionSetFor(trigger);
   showCompanionPrompt(trigger, comps).then(yes=>{
     if(yes){
-      addCompanionRows(idx, comps);
+      const setName = set && set.name ? String(set.name) : '';
+      addCompanionRows(idx, comps, setName);
       // Remember the whole set on the main part so the PDF's Article No cell can
       // list every code in the set (e.g. #46694, #35414, …) instead of only the
       // main one. Only set when accepted — declining leaves the single code.
       if(set && Array.isArray(set.parts) && set.parts.length){
         order.items[idx].setArticles = set.parts.map(p=>String(p||'').trim()).filter(Boolean);
+        order.items[idx].setName = setName;
       }
       applyCompanionSetImage(idx, set); // combined image → main part's photo
     }
@@ -2555,7 +2591,7 @@ function maybeSuggestCompanions(idx){
 
 // Adds companion parts as new, locked rows right after the source row, reusing
 // its Machine No / Machine Type. Respects the MAX_ITEMS cap.
-function addCompanionRows(srcIdx, comps){
+function addCompanionRows(srcIdx, comps, setName){
   const src = order.items[srcIdx] || {};
   let added = 0, skipped = 0;
   comps.forEach(c=>{
@@ -2565,7 +2601,8 @@ function addCompanionRows(srcIdx, comps){
     order.items.push({
       machineNo: src.machineNo||'', machineType: src.machineType||'',
       articleNo: c.articleNo, description: c.description,
-      qty:1, qtyUnit:'pcs', itemDesc:'', locked: true
+      qty:1, qtyUnit:'pcs', itemDesc:'', locked: true,
+      setName: setName || ''
     });
     added++;
   });
@@ -3634,6 +3671,37 @@ function resetPdfPreview(){
   if(card) card.style.display = 'none';
 }
 
+/* Part usage ledger: record WHERE each part went (customer / machine) once the
+   order is actually exported — an export is the real requisition, whereas a
+   Save is just a draft. Sent via the outbox helper so it survives being
+   offline. The backend upserts by orderId, so re-exporting the same order
+   replaces its rows instead of duplicating them. Locked companion rows are
+   included: they were requisitioned too. */
+async function recordOrderPartUsage(){
+  const items = (order.items||[])
+    .filter(it => it && String(it.articleNo||'').trim())
+    .map(it => ({
+      articleNo: String(it.articleNo).trim(),
+      partName: String(it.description||''),
+      machineNo: String(it.machineNo||''),
+      machineType: String(it.machineType||''),
+      qty: (it.qty === '' || it.qty == null) ? '' : it.qty,
+      unit: String(it.qtyUnit||''),
+      note: String(it.itemDesc||''),
+      setName: String(it.setName||'')
+    }));
+  if(!items.length) return;
+  try{
+    await lookupQueueOrSend('recordPartUsage', {
+      orderId: order.id,
+      type: order.type || '',
+      customer: order.customer || '',
+      recordedBy: getSessionEditor() || '',
+      items
+    });
+  }catch(e){ console.error('recordPartUsage failed', e); }
+}
+
 async function exportPdf(){
   try{ await saveOrder(); } catch(e){ console.error(e); }
 
@@ -3676,6 +3744,7 @@ async function exportPdf(){
       try{ card.scrollIntoView({ behavior:'smooth', block:'start' }); } catch(e){}
     }
     openPdfPreview();
+    recordOrderPartUsage();   // fire-and-forget: don't hold up the preview
   } catch(e){
     console.error('exportPdf failed', e);
     alert('Export PDF ไม่สำเร็จ: ' + (e && e.message ? e.message : e));

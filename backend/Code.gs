@@ -86,6 +86,8 @@ function handleRequest(e) {
       case 'logout':             result = logoutSession(params); break;
       case 'saveCompanionSet':   result = saveCompanionSet(params); break;
       case 'deleteCompanionSet': result = deleteCompanionSet(params); break;
+      case 'recordPartUsage':    result = recordPartUsage(params); break;
+      case 'getPartUsage':       result = getPartUsage(params); break;
       case 'ping':          result = { success: true, time: Date.now() }; break;
       case 'debugHeaders':  result = debugHeaders(); break;
       default:              result = { success: false, error: 'Unknown action: ' + params.action };
@@ -1060,4 +1062,101 @@ function logoutSession(params) {
   const editor = String((params && params.editor) || '').trim();
   getEditLogSheet_().appendRow([new Date(), editor || '(unknown)', 'logout', '', '', '', '']);
   return { success: true };
+}
+
+// ============================================================
+// PART USAGE LEDGER — recordPartUsage / getPartUsage
+// "Where has this part been requisitioned to?"  One FLAT row per
+// (order x part), denormalized on purpose: Customer / MachineNo /
+// MachineType / PartName are copied onto every row so the sheet can be
+// filtered or pivoted by hand in Google Sheets with no joins. Written only
+// when an order is actually exported (a real requisition), and upserted by
+// OrderId so re-exporting the same order replaces its rows instead of
+// duplicating them.
+// ============================================================
+const PARTUSAGE_SHEET = 'PartUsage';
+const PARTUSAGE_HEADERS = [
+  'Timestamp', 'OrderId', 'Type', 'Customer', 'MachineNo', 'MachineType',
+  'ArticleNo', 'PartName', 'Qty', 'Unit', 'Note', 'SetName', 'RecordedBy'
+];
+
+function getPartUsageSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(PARTUSAGE_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(PARTUSAGE_SHEET);
+    sh.appendRow(PARTUSAGE_HEADERS);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+// Replace every row belonging to `orderId` with the order's current items.
+// params: { orderId, type, customer, recordedBy, items:[{articleNo, partName,
+//           machineNo, machineType, qty, unit, note, setName}] }
+function recordPartUsage(params) {
+  const orderId = String((params && params.orderId) || '').trim();
+  if (!orderId) throw new Error('orderId required');
+  const items = (params && params.items) || [];
+
+  const sh = getPartUsageSheet_();
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    // 1) delete this order's existing rows (bottom-up so indexes stay valid)
+    const last = sh.getLastRow();
+    if (last > 1) {
+      const ids = sh.getRange(2, 2, last - 1, 1).getValues(); // col B = OrderId
+      for (var r = ids.length - 1; r >= 0; r--) {
+        if (String(ids[r][0]).trim() === orderId) sh.deleteRow(r + 2);
+      }
+    }
+
+    // 2) append the current items
+    const now = new Date();
+    const type = String((params && params.type) || '');
+    const customer = String((params && params.customer) || '');
+    const recordedBy = String((params && params.recordedBy) || '');
+    const rows = [];
+    items.forEach(function (it) {
+      const art = String((it && it.articleNo) || '').trim();
+      if (!art) return; // a part with no code isn't traceable — skip
+      rows.push([
+        now, orderId, type, customer,
+        String(it.machineNo || ''), String(it.machineType || ''),
+        art, String(it.partName || ''),
+        it.qty === '' || it.qty == null ? '' : it.qty,
+        String(it.unit || ''), String(it.note || ''), String(it.setName || ''),
+        recordedBy
+      ]);
+    });
+    if (rows.length) {
+      sh.getRange(sh.getLastRow() + 1, 1, rows.length, PARTUSAGE_HEADERS.length).setValues(rows);
+    }
+    return { success: true, orderId: orderId, written: rows.length };
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
+}
+
+// Usage history for ONE part (newest first). Queried on demand so the whole
+// ledger never has to be synced to the client.
+function getPartUsage(params) {
+  const articleNo = String((params && params.articleNo) || '').trim().toLowerCase();
+  if (!articleNo) throw new Error('articleNo required');
+  const limit = Number((params && params.limit) || 200);
+
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTUSAGE_SHEET);
+  if (!sh || sh.getLastRow() < 2) return { success: true, articleNo: articleNo, rows: [] };
+
+  const values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_HEADERS.length).getValues();
+  const out = [];
+  for (var i = values.length - 1; i >= 0 && out.length < limit; i--) {
+    const v = values[i];
+    if (String(v[6]).trim().toLowerCase() !== articleNo) continue; // col G = ArticleNo
+    const o = {};
+    PARTUSAGE_HEADERS.forEach(function (h, c) { o[h] = v[c] instanceof Date ? v[c].toISOString() : v[c]; });
+    out.push(o);
+  }
+  return { success: true, articleNo: articleNo, rows: out };
 }
