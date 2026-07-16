@@ -433,11 +433,17 @@ details.addr-details summary{cursor:pointer;font-size:12.5px;color:var(--gray);f
 .btn-file:active{transform:scale(.97);}
 .btn-clear-box{background:none;border:none;color:var(--gray);font-size:12px;text-decoration:underline;}
 
-.action-bar{
-  position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--border);
-  display:flex;gap:8px;padding:10px 12px;z-index:60;justify-content:center;
-}
-.action-bar .btn{flex:1;max-width:200px;}
+/* Floating action button: replaces the old fixed Save / Export bar. Tapping it
+   builds the A4 PDF and opens the preview, where the four actions live. */
+.fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));
+  width:56px;height:56px;border-radius:50%;background:var(--red);color:#fff;border:none;
+  font-size:24px;line-height:1;cursor:pointer;z-index:60;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 14px rgba(228,29,21,.4);
+  transition:transform .08s,box-shadow .15s;-webkit-tap-highlight-color:transparent;}
+.fab:hover{box-shadow:0 6px 18px rgba(228,29,21,.5);}
+.fab:active{transform:scale(.93);}
+.fab:disabled{opacity:.55;cursor:progress;}
 
 .status-msg{position:fixed;bottom:70px;left:50%;transform:translateX(-50%) translateY(10px);
   background:var(--dark);color:#fff;padding:8px 16px;border-radius:20px;font-size:13px;
@@ -490,6 +496,20 @@ details.addr-details summary{cursor:pointer;font-size:12.5px;color:var(--gray);f
   padding:5px 12px;font-size:12px;font-weight:600;}
 #emailDraftText{width:100%;min-height:160px;box-sizing:border-box;border:1px solid var(--border);
   border-radius:8px;padding:10px;font-size:13px;line-height:1.5;font-family:inherit;resize:vertical;color:#222;}
+/* The four actions live under the preview: decide what to do AFTER seeing the
+   PDF. 2 columns so all four fit without scrolling on a phone. */
+.pm-menu{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px 12px;
+  background:#fff;border-top:1px solid var(--border);flex-shrink:0;
+  padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));}
+.pm-menu-item{display:flex;align-items:center;justify-content:center;gap:7px;
+  border:1px solid var(--border);background:#fff;border-radius:9px;padding:12px 8px;
+  font-size:12.5px;font-weight:600;color:var(--dark);cursor:pointer;line-height:1.2;
+  transition:background .15s,border-color .15s,transform .05s;-webkit-tap-highlight-color:transparent;}
+.pm-menu-item:hover:not(:disabled){background:#f3f3f4;border-color:#c7c7c7;}
+.pm-menu-item:active:not(:disabled){transform:scale(.97);}
+.pm-menu-item:disabled{opacity:.4;cursor:not-allowed;}
+.pm-menu-item.primary{border-color:var(--red);color:var(--red);}
+.pm-menu-item.primary:hover:not(:disabled){background:#fff5f4;border-color:var(--red);}
 
 .preview-filename{font-size:12.5px;color:var(--gray);margin-bottom:10px;word-break:break-all;}
 .preview-actions-row{display:flex;gap:10px;flex-wrap:wrap;}
@@ -600,7 +620,6 @@ table.pphoto tr td:last-child{ border-right:none !important; }
     <div class="pdf-modal-bar">
       <div class="pm-title" id="pdfModalTitle">Preview PDF</div>
       <div class="pm-actions">
-        <button id="pdfModalDownload">ดาวน์โหลด</button>
         <button class="pm-close" id="pdfModalClose">✕</button>
       </div>
     </div>
@@ -613,6 +632,12 @@ table.pphoto tr td:last-child{ border-right:none !important; }
         </div>
         <textarea id="emailDraftText" readonly></textarea>
       </div>
+    </div>
+    <div class="pm-menu" role="menu">
+      <button class="pm-menu-item" id="pmSaveDraft" role="menuitem">💾 Save to draft</button>
+      <button class="pm-menu-item" id="pmSavePdf" role="menuitem">⬇ Save PDF</button>
+      <button class="pm-menu-item primary" id="pmSendEmail" role="menuitem">✉ Send to email</button>
+      <button class="pm-menu-item" id="pmShare" role="menuitem" title="ส่งไปยังแชท / แอปอื่น">📤 Share</button>
     </div>
   </div>
 
@@ -680,10 +705,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
 
 </div>
 
-<div class="action-bar">
-  <button class="btn btn-outline" id="btnSave">💾 Save</button>
-  <button class="btn btn-primary" id="btnExport">✉ Export PDF → Email</button>
-</div>
+<button class="fab" id="btnFab" title="สร้าง PDF A4 แล้วเลือกบันทึก / ส่ง" aria-label="สร้าง PDF A4 แล้วเลือกบันทึก หรือ ส่ง">📄</button>
 
 <div class="status-msg" id="statusMsg"></div>
 
@@ -3817,7 +3839,9 @@ async function exportPdf(){
       try{ card.scrollIntoView({ behavior:'smooth', block:'start' }); } catch(e){}
     }
     openPdfPreview();
-    recordOrderPartUsage();   // fire-and-forget: don't hold up the preview
+    // NB: the usage ledger is NOT written here — the ☰ FAB previews on every
+    // tap, and merely looking at a PDF isn't a requisition. It's written by the
+    // actions that actually send the PDF out (see commitPdfAction).
   } catch(e){
     console.error('exportPdf failed', e);
     alert('Export PDF ไม่สำเร็จ: ' + (e && e.message ? e.message : e));
@@ -3844,21 +3868,33 @@ function downloadPdfPreview(){
   a.click();
   a.remove();
 }
+/* The PDF has actually left the app (downloaded / emailed / shared) — THAT is the
+   requisition, so the usage ledger is written here rather than on preview.
+   Safe to call repeatedly: the backend upserts by orderId. */
+function commitPdfAction(){ recordOrderPartUsage(); }
+
+function pdfSubject(){
+  return [(order.type||'Warranty'), 'Part Order', order.customer ? '- '+order.customer : '']
+    .filter(Boolean).join(' ').trim();
+}
+async function currentPdfFile(){
+  try{
+    const blob = await (await fetch(_pdfPreviewUrl)).blob();
+    return new File([blob], _pdfPreviewFilename || 'export_order.pdf', { type:'application/pdf' });
+  }catch(e){ return null; }
+}
+
 /* Adaptive email: on phones (and modern desktops) share the actual PDF file so
    Outlook attaches it automatically; otherwise download the PDF and open a
    pre-filled Outlook/mail draft for the user to attach it. */
 async function emailCurrentPdf(){
   if(!_pdfPreviewUrl) return;
-  const subject = [(order.type||'Warranty'), 'Part Order', order.customer ? '- '+order.customer : ''].filter(Boolean).join(' ').trim();
+  const subject = pdfSubject();
   const body = _emailDraftText || '';
-  let file = null;
-  try{
-    const blob = await (await fetch(_pdfPreviewUrl)).blob();
-    file = new File([blob], _pdfPreviewFilename || 'export_order.pdf', { type:'application/pdf' });
-  }catch(e){ /* ignore, fall back below */ }
+  const file = await currentPdfFile();
 
   if(file && navigator.canShare && navigator.canShare({ files:[file] })){
-    try{ await navigator.share({ files:[file], title: subject, text: body }); return; }
+    try{ await navigator.share({ files:[file], title: subject, text: body }); commitPdfAction(); return; }
     catch(err){ if(err && err.name === 'AbortError') return; /* user cancelled */ }
   }
   // Fallback (desktop): download the file + open a pre-filled mail draft to attach it.
@@ -3867,12 +3903,37 @@ async function emailCurrentPdf(){
   const a = document.createElement('a');
   a.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body + note);
   document.body.appendChild(a); a.click(); a.remove();
+  commitPdfAction();
   flashStatus('ดาวน์โหลด PDF แล้ว — แนบไฟล์ลงอีเมลที่เปิดขึ้น');
 }
-/* Merged action: Save + Export PDF + create the Outlook draft. */
-async function saveExportEmail(){
-  await exportPdf();               // saves the order, builds the PDF, shows the preview
-  if(_pdfPreviewUrl) await emailCurrentPdf();
+
+/* Share to a chat / any other app. Same Web Share plumbing as the email action,
+   but without the mail framing — and no mailto fallback, since a browser that
+   can't share files has nothing to hand the PDF to but a download. */
+async function sharePdf(){
+  if(!_pdfPreviewUrl) return;
+  const file = await currentPdfFile();
+  if(file && navigator.canShare && navigator.canShare({ files:[file] })){
+    try{ await navigator.share({ files:[file], title: pdfSubject(), text: _emailDraftText || '' }); commitPdfAction(); }
+    catch(err){ if(!(err && err.name === 'AbortError')) flashStatus('แชร์ไม่สำเร็จ: ' + (err && err.message ? err.message : err), 5000); }
+    return;
+  }
+  downloadPdfPreview();
+  commitPdfAction();
+  flashStatus('เบราว์เซอร์นี้ส่งไฟล์ต่อให้แอปอื่นไม่ได้ — ดาวน์โหลด PDF ให้แล้ว ส่งต่อเองได้เลย', 5500);
+}
+
+function savePdfToDevice(){
+  if(!_pdfPreviewUrl) return;
+  downloadPdfPreview();
+  commitPdfAction();
+  flashStatus('ดาวน์โหลด PDF แล้ว');
+}
+
+/* Just keep it as a draft — no PDF leaves the app, so nothing is logged. */
+async function saveDraftFromPreview(){
+  await saveOrder();
+  userDismissTopModal();
 }
 
 /* ---------------- modal dismissal: Esc (desktop), Back button (mobile), tap-outside ----------------
@@ -4007,11 +4068,20 @@ function fullRender(){
 
 document.addEventListener('DOMContentLoaded', ()=>{
   fullRender();
-  document.getElementById('btnSave').onclick = saveOrder;
   document.getElementById('btnNew').onclick = ()=>{
     if(confirm('สร้างใบสั่งใหม่? ข้อมูลที่ยังไม่บันทึกจะหายไป')) newOrder();
   };
-  document.getElementById('btnExport').onclick = saveExportEmail;
+  // 📄 FAB: build the A4 PDF and show it. What to do with it is chosen from the
+  // menu under the preview. Disabled while rendering — html2canvas takes a beat.
+  const fab = document.getElementById('btnFab');
+  fab.onclick = async ()=>{
+    fab.disabled = true;
+    try{ await exportPdf(); } finally { fab.disabled = false; }
+  };
+  document.getElementById('pmSaveDraft').onclick = saveDraftFromPreview;
+  document.getElementById('pmSavePdf').onclick = savePdfToDevice;
+  document.getElementById('pmSendEmail').onclick = emailCurrentPdf;
+  document.getElementById('pmShare').onclick = sharePdf;
   document.getElementById('btnCloseHistory').onclick = ()=>toggleHistory(false);
   const histOverlay = document.querySelector('.overlay');
   if(histOverlay) histOverlay.onclick = ()=>toggleHistory(false);
@@ -4020,7 +4090,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('pdfModalClose').onclick = ()=>userDismissTopModal();
   const pdfModalEl = document.getElementById('pdfModal');
   pdfModalEl.addEventListener('click', (e)=>{ if(e.target === pdfModalEl) userDismissTopModal(); });
-  document.getElementById('pdfModalDownload').onclick = downloadPdfPreview;
   document.getElementById('emailCopyBtn').onclick = async ()=>{
     const ta = document.getElementById('emailDraftText');
     try{
