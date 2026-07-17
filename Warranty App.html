@@ -349,6 +349,39 @@ input[type=text],select,textarea{
   background:#fff;color:var(--dark);width:100%;
 }
 textarea{resize:vertical;min-height:64px;font-family:inherit;}
+
+/* ---- rich text field + floating format toolbar (B / I / U / A color) ----
+   A .rich-field is a contenteditable styled to pass for a normal input. The
+   toolbar is one shared element that pops over whichever selection is active. */
+.rich-field{border:1px solid var(--border);border-radius:7px;padding:9px 10px;font-size:14px;
+  background:#fff;color:var(--dark);width:100%;box-sizing:border-box;min-height:38px;
+  white-space:pre-wrap;word-break:break-word;overflow:auto;max-height:120px;cursor:text;}
+.rich-field:focus{outline:2px solid rgba(228,29,21,.25);outline-offset:0;}
+.rich-field:empty::before{content:attr(data-placeholder);color:#b9b9b9;pointer-events:none;}
+.fmt-toolbar{position:fixed;z-index:200;display:none;align-items:center;gap:2px;
+  background:#232323;border-radius:10px;padding:4px 6px;box-shadow:0 4px 16px rgba(0,0,0,.35);}
+.fmt-toolbar.show{display:flex;}
+.fmt-btn{background:none;border:none;color:#f2f2f2;width:38px;height:38px;border-radius:7px;
+  font-size:16px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  -webkit-tap-highlight-color:transparent;}
+.fmt-btn:hover{background:#3a3a3a;}
+.fmt-btn:active{background:#4a4a4a;}
+.fmt-btn.fmt-b{font-weight:800;}
+.fmt-btn.fmt-i{font-style:italic;font-family:Georgia,serif;}
+.fmt-btn.fmt-u{text-decoration:underline;}
+.fmt-btn.fmt-a{flex-direction:column;gap:1px;font-weight:700;}
+.fmt-btn.fmt-a .bar{width:16px;height:4px;background:var(--red);border-radius:1px;display:block;}
+.fmt-color-pop{position:fixed;z-index:201;display:none;background:#fff;border:1px solid var(--border);
+  border-radius:10px;padding:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);width:196px;}
+.fmt-color-pop.show{display:block;}
+.fmt-color-pop .cp-title{font-size:11px;font-weight:700;color:var(--gray);margin:0 0 6px;}
+.fmt-color-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:8px;}
+.fmt-swatch{width:24px;height:24px;border-radius:5px;border:1px solid rgba(0,0,0,.15);cursor:pointer;padding:0;
+  -webkit-tap-highlight-color:transparent;}
+.fmt-swatch:active{transform:scale(.9);}
+.fmt-more-colors{display:flex;align-items:center;gap:7px;background:none;border:none;color:var(--dark);
+  font-size:12.5px;font-weight:600;cursor:pointer;padding:4px 2px;width:100%;text-align:left;}
+.fmt-more-colors:hover{color:var(--red);}
 details.addr-details{margin-top:4px;}
 details.addr-details summary{cursor:pointer;font-size:12.5px;color:var(--gray);font-weight:600;margin-bottom:8px;}
 .addr-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;}
@@ -1152,6 +1185,41 @@ window.SARABUN_BOLD_B64 = "AAEAAAAPAIAAAwBwRFNJRwAAAAEAAV7EAAAACEdERUYtZC3gAAAA/
 /* escHtml: HTML-escape helper for print template */
 function escHtml(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+// Whitelist sanitizer for rich-text fields. Formatting tags survive; everything
+// else is unwrapped (children kept) — except script-ish elements, which are
+// dropped whole so their contents can't reappear as text. Attributes: only
+// font[color] and a style whose sole surviving property is color. Global (not
+// in the app IIFE) because buildPrintHtml lives in this script block too.
+function sanitizeRichHtml(html){
+  const ALLOW = {B:1,STRONG:1,I:1,EM:1,U:1,FONT:1,SPAN:1,BR:1,DIV:1};
+  const DROP  = /^(SCRIPT|STYLE|IFRAME|OBJECT|EMBED|LINK|META|TITLE|TEXTAREA|SVG|MATH)$/;
+  const tpl = document.createElement('template');
+  tpl.innerHTML = String(html == null ? '' : html);
+  (function walk(root){
+    Array.from(root.children).forEach(el=>{
+      if(DROP.test(el.tagName)){ el.remove(); return; }
+      walk(el);
+      if(!ALLOW[el.tagName]){
+        while(el.firstChild) el.parentNode.insertBefore(el.firstChild, el);
+        el.remove();
+        return;
+      }
+      Array.from(el.attributes).forEach(a=>{
+        const n = a.name.toLowerCase();
+        if(el.tagName === 'FONT' && n === 'color') return;
+        if(n === 'style'){
+          const c = el.style.color;
+          el.removeAttribute('style');
+          if(c) el.style.color = c;
+          return;
+        }
+        el.removeAttribute(a.name);
+      });
+    });
+  })(tpl.content);
+  return tpl.innerHTML;
+}
+
 /* Dynamically inject @font-face for print template, reusing existing embedded font data
    (avoids duplicating the large base64 font blobs already present as window.SARABUN_*_B64) */
 let _sarabunFontFaceInjected = false;
@@ -1178,15 +1246,23 @@ function buildPrintHtml(ord){
     // parts stripped (no double spaces). The unit only shows when a qty exists.
     const qtyStr = String(it.qty == null ? '' : it.qty).trim();
     const unitStr = qtyStr ? String(it.qtyUnit || '').trim() : '';
-    const descCombined = [it.description, qtyStr, unitStr, it.itemDesc]
+    // itemDesc may carry rich formatting (itemDescHtml) — re-sanitized here as
+    // a second line of defense; every other fragment stays escaped plain text.
+    const itemDescPlain = String(it.itemDesc == null ? '' : it.itemDesc).trim();
+    const itemDescHtml = itemDescPlain
+      ? (it.itemDescHtml ? sanitizeRichHtml(it.itemDescHtml) : escHtml(itemDescPlain))
+      : '';
+    const descCombined = [it.description, qtyStr, unitStr]
       .map(v => String(v == null ? '' : v).trim())
       .filter(Boolean)
+      .map(escHtml)
+      .concat(itemDescHtml ? [itemDescHtml] : [])
       .join(' ');
     itemRows.push(`<tr>
       <td class="pcol-mno">${escHtml(it.machineNo)}</td>
       <td class="pcol-mtype">${escHtml(it.machineType)}</td>
       <td class="pcol-art">${escHtml(it.articleNo)}</td>
-      <td class="pcol-desc">${escHtml(descCombined)}</td>
+      <td class="pcol-desc">${descCombined}</td>
     </tr>`);
   }
 
@@ -3257,6 +3333,133 @@ async function openUsageModal(articleNo){
   bodyEl.innerHTML = renderUsageRows(rows);
 }
 
+/* ---------------- rich text: sanitizer + floating format toolbar ----------------
+   Any element with class .rich-field (a contenteditable) gets the shared
+   B / I / U / A-color toolbar automatically — it pops over the text selection
+   and hides when the selection collapses. Data contract: store BOTH the plain
+   text (for search / regex / Sheets sync) and the sanitized HTML (for display
+   and the PDF); never let the HTML flavor leak into anything that matches or
+   syncs. */
+
+const FMT_STANDARD_COLORS = ['#c00000','#e41d15','#ed7d31','#ffff00','#a9d18e','#00b050','#00b0f0','#0070c0','#002060','#7030a0','#000000','#6d6e71'];
+let _fmtBar = null, _fmtPop = null, _fmtNative = null;
+let _fmtField = null;          // the .rich-field the current selection lives in
+let _fmtSavedRange = null;     // saved before the color popup steals focus
+
+function fmtApply(cmd, val){
+  if(_fmtSavedRange){
+    const sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(_fmtSavedRange);
+    _fmtSavedRange = null;
+  }
+  try{ document.execCommand('styleWithCSS', false, false); }catch(e){}
+  document.execCommand(cmd, false, val || null);
+  // make sure the field's oninput wiring stores the new plain+html pair
+  if(_fmtField) _fmtField.dispatchEvent(new Event('input', {bubbles:true}));
+}
+function fmtHidePopup(){ if(_fmtPop) _fmtPop.classList.remove('show'); }
+function fmtHideAll(){ if(_fmtBar) _fmtBar.classList.remove('show'); fmtHidePopup(); }
+
+function ensureFmtToolbar(){
+  if(_fmtBar) return;
+  _fmtBar = document.createElement('div');
+  _fmtBar.className = 'fmt-toolbar';
+  _fmtBar.innerHTML = `
+    <button type="button" class="fmt-btn fmt-b" data-cmd="bold" aria-label="ตัวหนา">B</button>
+    <button type="button" class="fmt-btn fmt-i" data-cmd="italic" aria-label="ตัวเอียง">I</button>
+    <button type="button" class="fmt-btn fmt-u" data-cmd="underline" aria-label="ขีดเส้นใต้">U</button>
+    <button type="button" class="fmt-btn fmt-a" data-cmd="color" aria-label="สีตัวอักษร"><span>A</span><span class="bar"></span></button>`;
+  _fmtPop = document.createElement('div');
+  _fmtPop.className = 'fmt-color-pop';
+  _fmtPop.innerHTML = `
+    <p class="cp-title">Standard Colors</p>
+    <div class="fmt-color-grid">${FMT_STANDARD_COLORS.map(c=>`<button type="button" class="fmt-swatch" data-color="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}</div>
+    <button type="button" class="fmt-more-colors">🎨 More Colors…</button>`;
+  _fmtNative = document.createElement('input');
+  _fmtNative.type = 'color';
+  _fmtNative.style.cssText = 'position:fixed;left:-9999px;top:0;';
+  document.body.appendChild(_fmtBar);
+  document.body.appendChild(_fmtPop);
+  document.body.appendChild(_fmtNative);
+
+  // mousedown (not click) + preventDefault so pressing a button never moves
+  // focus / collapses the selection being formatted
+  _fmtBar.addEventListener('mousedown', e=>e.preventDefault());
+  _fmtPop.addEventListener('mousedown', e=>e.preventDefault());
+  _fmtBar.querySelectorAll('.fmt-btn').forEach(b=>{
+    b.onclick = ()=>{
+      const cmd = b.dataset.cmd;
+      if(cmd === 'color'){
+        // save the range NOW — opening the popup / native picker kills it
+        const sel = window.getSelection();
+        if(sel && sel.rangeCount && !sel.isCollapsed) _fmtSavedRange = sel.getRangeAt(0).cloneRange();
+        const r = _fmtBar.getBoundingClientRect();
+        _fmtPop.classList.add('show');
+        const pw = _fmtPop.offsetWidth, ph = _fmtPop.offsetHeight;
+        _fmtPop.style.left = Math.max(4, Math.min(r.left, window.innerWidth - pw - 4)) + 'px';
+        _fmtPop.style.top = (r.bottom + ph + 8 < window.innerHeight ? r.bottom + 6 : Math.max(4, r.top - ph - 6)) + 'px';
+        return;
+      }
+      fmtHidePopup();
+      fmtApply(cmd);
+    };
+  });
+  _fmtPop.querySelectorAll('.fmt-swatch').forEach(sw=>{
+    sw.onclick = ()=>{ fmtHidePopup(); fmtApply('foreColor', sw.dataset.color); };
+  });
+  _fmtPop.querySelector('.fmt-more-colors').onclick = ()=>{ fmtHidePopup(); _fmtNative.click(); };
+  _fmtNative.oninput = ()=>fmtApply('foreColor', _fmtNative.value);
+
+  // Reposition while scrolling; hide if the selection is gone
+  window.addEventListener('scroll', ()=>{ if(_fmtBar.classList.contains('show')) fmtSyncToSelection(); }, true);
+  window.addEventListener('resize', ()=>{ if(_fmtBar.classList.contains('show')) fmtSyncToSelection(); });
+}
+
+function fmtSyncToSelection(){
+  const sel = window.getSelection();
+  if(!sel || !sel.rangeCount || sel.isCollapsed){ if(!_fmtPop || !_fmtPop.classList.contains('show')) fmtHideAll(); return; }
+  const node = sel.anchorNode;
+  const host = node && (node.nodeType === 1 ? node : node.parentElement);
+  const field = host && host.closest ? host.closest('.rich-field') : null;
+  if(!field){ fmtHideAll(); _fmtField = null; return; }
+  _fmtField = field;
+  ensureFmtToolbar();
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  if(!rect || (rect.width === 0 && rect.height === 0)){ fmtHideAll(); return; }
+  _fmtBar.classList.add('show');
+  const bw = _fmtBar.offsetWidth, bh = _fmtBar.offsetHeight;
+  const left = Math.max(4, Math.min(rect.left + rect.width/2 - bw/2, window.innerWidth - bw - 4));
+  // above the selection; below it if there's no room (also dodges mobile handles)
+  const top = rect.top - bh - 10 >= 4 ? rect.top - bh - 10 : Math.min(rect.bottom + 12, window.innerHeight - bh - 4);
+  _fmtBar.style.left = left + 'px';
+  _fmtBar.style.top = top + 'px';
+}
+
+// selectionchange fires on both mouse-drag and touch selection. Debounced a
+// touch so the toolbar doesn't flicker while the selection is still growing.
+let _fmtSelTimer = null;
+document.addEventListener('selectionchange', ()=>{
+  clearTimeout(_fmtSelTimer);
+  _fmtSelTimer = setTimeout(fmtSyncToSelection, 120);
+});
+
+// Wires one contenteditable as a rich field: paste sanitizing + the
+// plain/html dual-store callback. onChange(plainText, sanitizedHtml).
+function initRichField(el, onChange){
+  el.addEventListener('paste', e=>{
+    e.preventDefault();
+    const dt = e.clipboardData || window.clipboardData;
+    const rawHtml = dt && dt.getData && dt.getData('text/html');
+    const rawText = dt && dt.getData ? dt.getData('text/plain') : '';
+    if(rawHtml) document.execCommand('insertHTML', false, sanitizeRichHtml(rawHtml));
+    else document.execCommand('insertText', false, rawText || '');
+  });
+  el.addEventListener('input', ()=>{
+    onChange(el.innerText.replace(/ /g,' ').replace(/\n+$/,''), sanitizeRichHtml(el.innerHTML));
+  });
+  el.addEventListener('blur', ()=>{ setTimeout(()=>{ const s=window.getSelection(); if(!s || s.isCollapsed) fmtHideAll(); }, 200); });
+}
+
 /* ---------------- items table ---------------- */
 function renderItems(){
   const list = document.getElementById('itemsList');
@@ -3289,7 +3492,7 @@ function renderItems(){
           <label class="fld-stack pname-fld"><span class="fld-cap">Part Name</span><div class="ac-wrap"><input type="text" class="f-description" data-idx="${idx}" value="${escAttr(it.description)}" autocomplete="off"><div class="ac-list" id="descAc${idx}"></div></div></label>
           <label class="fld-stack qty-fld"><span class="fld-cap">Qty</span><div class="qty-inputs"><input type="number" class="f-qty" data-idx="${idx}" value="${escAttr(it.qty)}" min="0"><select class="f-qtyunit" data-idx="${idx}"><option value="pcs"${it.qtyUnit!=='set'?' selected':''}>pcs</option><option value="set"${it.qtyUnit==='set'?' selected':''}>set</option></select></div></label>
         </div>
-        <label class="fld-stack"><span class="fld-cap">Description</span><input type="text" class="f-itemdesc" data-idx="${idx}" value="${escAttr(it.itemDesc)}" autocomplete="off" placeholder="e.g. damaged at left side"></label>
+        <div class="fld-stack"><span class="fld-cap">Description</span><div class="rich-field f-itemdesc" contenteditable="true" data-idx="${idx}" data-placeholder="e.g. damaged at left side">${it.itemDescHtml ? sanitizeRichHtml(it.itemDescHtml) : escHtml(it.itemDesc)}</div></div>
         <div class="alias-add-row" data-idx="${idx}"></div>
         <div class="item-photo fld-stack">
           <span class="fld-cap">รูปอะไหล่ <span class="item-photo-status" id="itemPhotoStatus${idx}"></span></span>
@@ -3365,7 +3568,12 @@ function renderItems(){
   });
   list.querySelectorAll('.f-itemdesc').forEach(el=>{
     const idx = +el.dataset.idx;
-    el.oninput = e=>{ order.items[idx].itemDesc = e.target.value; };
+    // Dual store: plain text drives search / Sheets sync / the usage ledger;
+    // the sanitized HTML only ever feeds display and the PDF.
+    initRichField(el, (plain, html)=>{
+      order.items[idx].itemDesc = plain;
+      order.items[idx].itemDescHtml = html;
+    });
   });
   list.querySelectorAll('.mt-wrap').forEach(wrap=>{
     const idx = +wrap.dataset.idx;
