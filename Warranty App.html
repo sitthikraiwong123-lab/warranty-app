@@ -1319,7 +1319,7 @@ function buildPrintHtml(ord){
           <div class="plogo"><img src="${window.LOGO_DATA_URL}"></div>
         </div>
       </td></tr>
-      <tr class="ppt-row"><td><div class="ppt-cell ppt-lbl" style="width:20mm;">Priority:</div><div class="ppt-cell ppt-val" style="width:65mm;">${escHtml(ord.priority)}</div><div class="ppt-cell ppt-lbl" style="width:20mm;">Type:</div><div class="ppt-cell ppt-val" style="width:65mm;">${escHtml(ord.type)}${ord.exportNo ? ' <span style="color:#2563eb;font-weight:bold;">'+escHtml(ord.exportNo)+'</span>' : ''}</div></td></tr>
+      <tr class="ppt-row"><td><div class="ppt-cell ppt-lbl" style="width:20mm;">Priority:</div><div class="ppt-cell ppt-val" style="width:65mm;">${escHtml(ord.priority)}</div><div class="ppt-cell ppt-lbl" style="width:20mm;">Type:</div><div class="ppt-cell ppt-val" style="width:65mm;">${escHtml(ord.type)}${ord.exportNo ? '<span style="float:right;font-style:normal;color:#2563eb;font-weight:bold;">'+escHtml(ord.exportNo)+'</span>' : ''}</div></td></tr>
       <tr class="paddr-label-row"><td>
         <div class="paddr-cell paddr-lbl-box" style="width:40mm;">Invoice address:</div><div class="paddr-cell paddr-val-box" style="width:130mm;">Schmoll Asia Pacific (Thailand) Limited</div>
       </td></tr>
@@ -1538,24 +1538,35 @@ async function saveAppSettings(patch){
   }
 }
 
-/* Blue chip next to the Type field. Shows the order's own number once it has
-   been exported (a Draft keeps its number), otherwise a preview of the next
-   global number. A Power User can tap it to edit — the current order's number
-   when it already has one (local to this Draft), or the shared next number when
-   it doesn't (applies to everyone). */
+/* Blue chip next to the Type field — DISPLAY ONLY. It shows the order's own
+   number once it has been exported (a Draft keeps its number), otherwise a
+   preview of the next global number. Editing is done from the ☰ Power User menu
+   only (see the "✏️ แก้เลข…" item), which this function keeps in sync too. */
 function renderRunNumber(){
   const chip = document.getElementById('runNumberChip');
-  if(!chip) return;
-  if(!runNumberEnabled()){ chip.style.display = 'none'; chip.onclick = null; return; }
+  const re = document.getElementById('btnRunNumEdit');
+  const on = runNumberEnabled();
   const assigned = (typeof order !== 'undefined' && order) ? order.exportNo : null;
-  chip.style.display = '';
-  chip.textContent = assigned || runNumberPreview();
-  const canEdit = isPowerUser();
-  chip.classList.toggle('editable', canEdit);
-  chip.title = assigned
-    ? (canEdit ? 'เลขที่เอกสารของ Draft นี้ — แตะเพื่อแก้ (เฉพาะใบนี้)' : 'เลขที่เอกสาร')
-    : (canEdit ? 'เลขรันถัดไป (ยังไม่ Export) — แตะเพื่อแก้เลขกลาง (มีผลกับทุกคน)' : 'เลขรันถัดไป');
-  chip.onclick = canEdit ? (()=>{ if(assigned) editThisOrderNumber(); else editRunningNumber(); }) : null;
+  if(chip){
+    if(!on){ chip.style.display = 'none'; chip.onclick = null; }
+    else {
+      chip.style.display = '';
+      chip.textContent = assigned || runNumberPreview();
+      chip.classList.remove('editable');   // not clickable — editing lives in the menu
+      chip.onclick = null;
+      chip.title = assigned ? 'เลขที่เอกสาร' : 'เลขรันถัดไป';
+    }
+  }
+  // The one place to edit the number: the Power User menu item. Its label +
+  // action follow the current order (edit this Draft's own number, or — for a
+  // fresh order with no number yet — the shared next number).
+  if(re){
+    const show = on && isPowerUser();
+    re.style.display = show ? '' : 'none';
+    re.textContent = assigned ? ('✏️ แก้เลขใบนี้ (' + assigned + ')')
+                              : ('✏️ แก้เลขรันถัดไป (' + runNumberPreview() + ')');
+    re.onclick = show ? (()=>{ if(assigned) editThisOrderNumber(); else editRunningNumber(); }) : null;
+  }
 }
 /* Edit the SHARED next number (affects everyone who exports next). */
 async function editRunningNumber(){
@@ -4868,7 +4879,6 @@ function refreshPowerMenuUI(){
   const pu = document.getElementById('btnPowerUser');
   const ft = document.getElementById('btnFmtToggle');
   const rn = document.getElementById('btnRunNumToggle');
-  const re = document.getElementById('btnRunNumEdit');
   if(!pu || !ft) return;
   const on = isPowerUser();
   pu.textContent = on ? '🔑 Power User ✓ (ออกจากระบบ)' : '🔑 Power User';
@@ -4878,11 +4888,7 @@ function refreshPowerMenuUI(){
     rn.style.display = on ? '' : 'none';
     rn.textContent = '🔢 Running number: ' + (runNumberEnabled() ? 'เปิดอยู่ ✅' : 'ปิดอยู่');
   }
-  if(re){
-    re.style.display = (on && runNumberEnabled()) ? '' : 'none';
-    re.textContent = '✏️ แก้เลขรันถัดไป (' + runNumberPreview() + ')';
-  }
-  try{ renderRunNumber(); }catch(e){}   // chip editability follows login state
+  try{ renderRunNumber(); }catch(e){}   // keeps the chip + the ✏️ edit menu item in sync
 }
 
 function openPowerLogin(){
@@ -4967,11 +4973,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
       ? 'เปิด Running number แล้ว (มีผลกับทุกคน) — เลขจะรันอัตโนมัติทุกครั้งที่ Export'
       : 'ปิด Running number แล้ว (มีผลกับทุกคน)');
   };
-  const re = document.getElementById('btnRunNumEdit');
-  if(re) re.onclick = ()=>{
-    if(!isPowerUser() || !runNumberEnabled()) return;
-    editRunningNumber();
-  };
+  // btnRunNumEdit's click handler is wired in renderRunNumber (it depends on the
+  // current order — edit this Draft's number vs the shared next number).
   refreshPowerMenuUI();
 });
 
