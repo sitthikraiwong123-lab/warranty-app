@@ -353,7 +353,7 @@ textarea{resize:vertical;min-height:64px;font-family:inherit;}
 /* ---- rich text field + floating format toolbar (B / I / U / A color) ----
    A .rich-field is a contenteditable styled to pass for a normal input. The
    toolbar is one shared element that pops over whichever selection is active. */
-.rich-field{border:1px solid var(--border);border-radius:7px;padding:9px 10px;font-size:14px;
+.rich-field{border:1px solid var(--border);border-radius:7px;padding:9px 10px;font-size:14px;font-weight:400; /* explicit: a div inherits the label's bold caption weight, which made execCommand('bold') toggle the wrong way */
   background:#fff;color:var(--dark);width:100%;box-sizing:border-box;min-height:38px;
   white-space:pre-wrap;word-break:break-word;overflow:auto;max-height:120px;cursor:text;}
 .rich-field:focus{outline:2px solid rgba(228,29,21,.25);outline-offset:0;}
@@ -1254,10 +1254,13 @@ function buildPrintHtml(ord){
     const itemDescHtml = itemDescPlain
       ? (it.itemDescHtml ? sanitizeRichHtml(it.itemDescHtml) : escHtml(itemDescPlain))
       : '';
-    const descCombined = [it.description, qtyStr, unitStr]
-      .map(v => String(v == null ? '' : v).trim())
-      .filter(Boolean)
-      .map(escHtml)
+    // Part Name is a rich field too — same plain/html pair, same re-sanitize.
+    const pnamePlain = String(it.description == null ? '' : it.description).trim();
+    const pnameHtml = pnamePlain
+      ? (it.descriptionHtml ? sanitizeRichHtml(it.descriptionHtml) : escHtml(pnamePlain))
+      : '';
+    const descCombined = (pnameHtml ? [pnameHtml] : [])
+      .concat([qtyStr, unitStr].filter(Boolean).map(escHtml))
       .concat(itemDescHtml ? [itemDescHtml] : [])
       .join(' ');
     itemRows.push(`<tr>
@@ -3087,6 +3090,7 @@ function selectPartSuggestion(idx, p){
   }
   order.items[idx].articleNo = realArticleNo;
   order.items[idx].description = canonical || order.items[idx].description;
+  order.items[idx].descriptionHtml = ''; // canonical DB name replaces whatever formatting was typed
   renderItems();
   flashField(`.f-description[data-idx="${idx}"]`);
   maybeAutofillDbImage(idx);
@@ -3154,6 +3158,7 @@ function onArticleNoEntered(idx, articleNo){
     const canonical = (match.Description||'').trim();
     if(!currentDesc){
       order.items[idx].description = canonical;
+      order.items[idx].descriptionHtml = '';
       renderItems();
       if(canonical) flashField(`.f-description[data-idx="${idx}"]`);
       return;
@@ -3161,6 +3166,7 @@ function onArticleNoEntered(idx, articleNo){
     if(canonical && currentDesc.toLowerCase() !== canonical.toLowerCase()){
       recordPartAliasIfNew(articleNo, currentDesc); // save what was typed as an alias, if it's genuinely new
       order.items[idx].description = canonical;     // then switch the field to the real name
+      order.items[idx].descriptionHtml = '';
       renderItems();
       flashField(`.f-description[data-idx="${idx}"]`);
       return;
@@ -3508,7 +3514,7 @@ function renderItems(){
         <label class="fld-inline"><span class="fld-cap">Machine Type*</span><div class="mt-wrap" data-idx="${idx}"></div></label>
         <div class="fld-inline"><span class="fld-cap">Article No</span><div class="ac-wrap"><input type="text" class="f-articleNo" data-idx="${idx}" value="${escAttr(it.articleNo)}" autocomplete="off"><div class="ac-list" id="partAc${idx}"></div></div><button type="button" class="btn-usage f-usage" data-idx="${idx}" title="ดูประวัติการเบิก: พาร์ทนี้เคยเบิกให้ลูกค้า/เครื่องรุ่นไหน" aria-label="ดูประวัติการเบิกของพาร์ทนี้"${String(it.articleNo||'').trim()?'':' disabled'}>👁</button></div>
         <div class="pname-qty-row">
-          <label class="fld-stack pname-fld"><span class="fld-cap">Part Name</span><div class="ac-wrap"><input type="text" class="f-description" data-idx="${idx}" value="${escAttr(it.description)}" autocomplete="off"><div class="ac-list" id="descAc${idx}"></div></div></label>
+          <label class="fld-stack pname-fld"><span class="fld-cap">Part Name</span><div class="ac-wrap"><div class="rich-field f-description" contenteditable="true" data-idx="${idx}">${it.descriptionHtml ? sanitizeRichHtml(it.descriptionHtml) : escHtml(it.description)}</div><div class="ac-list" id="descAc${idx}"></div></div></label>
           <label class="fld-stack qty-fld"><span class="fld-cap">Qty</span><div class="qty-inputs"><input type="number" class="f-qty" data-idx="${idx}" value="${escAttr(it.qty)}" min="0"><select class="f-qtyunit" data-idx="${idx}"><option value="pcs"${it.qtyUnit!=='set'?' selected':''}>pcs</option><option value="set"${it.qtyUnit==='set'?' selected':''}>set</option></select></div></label>
         </div>
         <div class="fld-stack"><span class="fld-cap">Description</span><div class="rich-field f-itemdesc" contenteditable="true" data-idx="${idx}" data-placeholder="e.g. damaged at left side">${it.itemDescHtml ? sanitizeRichHtml(it.itemDescHtml) : escHtml(it.itemDesc)}</div></div>
@@ -3559,11 +3565,15 @@ function renderItems(){
   list.querySelectorAll('.f-description').forEach(el=>{
     const idx = +el.dataset.idx;
     const ac = document.getElementById('descAc'+idx);
-    el.oninput = e=>{
-      order.items[idx].description = e.target.value;
-      renderPartSuggestions(ac, idx, e.target.value);
-    };
-    el.onfocus = e=>renderPartSuggestions(ac, idx, e.target.value);
+    // Rich field, same dual store as Description: the PLAIN text keeps driving
+    // the part search, Sheets sync and the usage ledger; the sanitized HTML
+    // only ever feeds display and the PDF.
+    initRichField(el, (plain, html)=>{
+      order.items[idx].description = plain;
+      order.items[idx].descriptionHtml = html;
+      renderPartSuggestions(ac, idx, plain);
+    });
+    el.onfocus = ()=>renderPartSuggestions(ac, idx, (el.innerText||'').trim());
     el.onblur = ()=>{
       setTimeout(()=>ac.classList.remove('show'), 150);
       setTimeout(()=>{
