@@ -91,6 +91,9 @@ function handleRequest(e) {
       case 'addPendingPart':     result = addPendingPart(params); break;
       case 'getPendingParts':    result = getPendingParts(params); break;
       case 'deletePendingPart':  result = deletePendingPart(params); break;
+      case 'getAppSettings':     result = getAppSettings(); break;
+      case 'setAppSettings':     result = setAppSettings(params); break;
+      case 'reserveExportNumber':result = reserveExportNumber(params); break;
       case 'ping':          result = { success: true, time: Date.now() }; break;
       case 'debugHeaders':  result = debugHeaders(); break;
       default:              result = { success: false, error: 'Unknown action: ' + params.action };
@@ -99,6 +102,87 @@ function handleRequest(e) {
     result = { success: false, error: String(err) };
   }
   return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ============================================================
+// APP SETTINGS (global, shared by every client) + running export number
+// ------------------------------------------------------------
+// Power-User feature flags and the running export-number counter live here in
+// Script Properties (one JSON blob) rather than in each browser's localStorage,
+// so they are "neutral": when an admin flips a flag or edits the number, every
+// device picks up the same value on its next load. The number is handed out by
+// reserveExportNumber() under a script lock, so two people exporting at the same
+// moment can never receive the same number.
+// ============================================================
+const APP_SETTINGS_KEY = 'APP_SETTINGS';
+function defaultAppSettings_() {
+  return {
+    fmtToolbar: false,        // format toolbar (B/I/U/colour) — global on/off
+    runNumberEnabled: false,  // running export number — global on/off
+    runPrefix: 'TL',          // number prefix, e.g. TL2026-001
+    runYear: (new Date()).getFullYear(),
+    runNext: 1                // next sequence to hand out
+  };
+}
+function readAppSettings_() {
+  const raw = PropertiesService.getScriptProperties().getProperty(APP_SETTINGS_KEY);
+  let stored = {};
+  if (raw) { try { stored = JSON.parse(raw); } catch (e) { stored = {}; } }
+  const out = defaultAppSettings_();
+  Object.keys(out).forEach(function(k) {
+    if (stored[k] !== undefined && stored[k] !== null) out[k] = stored[k];
+  });
+  return out;
+}
+function writeAppSettings_(s) {
+  PropertiesService.getScriptProperties().setProperty(APP_SETTINGS_KEY, JSON.stringify(s));
+}
+function pad3_(n) { n = String(n); return n.length >= 3 ? n : ('000' + n).slice(-3); }
+
+function getAppSettings() {
+  return { success: true, settings: readAppSettings_() };
+}
+
+// Merge a whitelisted patch into the global settings. Used by the Power-User
+// toggles (feature on/off) and the "edit running number" control.
+function setAppSettings(params) {
+  const patch = (params && params.settings) || {};
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const s = readAppSettings_();
+    ['fmtToolbar', 'runNumberEnabled', 'runPrefix', 'runYear', 'runNext'].forEach(function(k) {
+      if (patch[k] !== undefined) s[k] = patch[k];
+    });
+    s.fmtToolbar = !!s.fmtToolbar;
+    s.runNumberEnabled = !!s.runNumberEnabled;
+    s.runPrefix = String(s.runPrefix || 'TL').trim().slice(0, 8) || 'TL';
+    s.runYear = parseInt(s.runYear, 10) || (new Date()).getFullYear();
+    s.runNext = Math.max(1, parseInt(s.runNext, 10) || 1);
+    writeAppSettings_(s);
+    return { success: true, settings: s };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Atomically hand out the next running export number and advance the counter.
+// Rolls the sequence back to 1 whenever the calendar year changes.
+function reserveExportNumber(params) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const s = readAppSettings_();
+    const curYear = (new Date()).getFullYear();
+    if (parseInt(s.runYear, 10) !== curYear) { s.runYear = curYear; s.runNext = 1; }
+    const seq = Math.max(1, parseInt(s.runNext, 10) || 1);
+    const formatted = String(s.runPrefix || 'TL') + s.runYear + '-' + pad3_(seq);
+    s.runNext = seq + 1;
+    writeAppSettings_(s);
+    return { success: true, prefix: s.runPrefix, year: s.runYear, seq: seq, formatted: formatted, next: s.runNext };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ============================================================
