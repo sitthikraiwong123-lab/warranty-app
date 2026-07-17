@@ -63,6 +63,24 @@ input,select,textarea{font-family:inherit;font-size:14px;}
 .db-part-card{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--border);
   border-radius:10px;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,.04);}
 .db-part-thumb{width:68px;height:68px;object-fit:cover;border-radius:8px;flex-shrink:0;background:#eee;cursor:zoom-in;border:1px solid var(--border);}
+/* ⏳ รออัพเดทเข้า DB — a queue card leads with the photo + the context captured
+   at requisition time, since that's what identifies a part nobody has a code for. */
+.pend-list{display:flex;flex-direction:column;gap:8px;}
+.pend-card{display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--border);
+  border-left:3px solid #ef9f27;border-radius:0 9px 9px 0;padding:10px;}
+.pend-thumb{width:60px;height:60px;}
+.pend-thumb.noimg{display:flex;align-items:center;justify-content:center;font-size:22px;color:#bbb;cursor:default;}
+.pend-main{flex:1;min-width:0;}
+.pend-name{font-weight:700;font-size:13.5px;color:var(--dark);word-break:break-word;}
+.pend-meta{font-size:11.5px;color:var(--gray);margin-top:2px;}
+.pend-meta.pend-when{color:#aaa;}
+.pend-actions{display:flex;flex-direction:column;gap:6px;flex-shrink:0;}
+.pend-actions .btn{padding:6px 10px;font-size:12px;white-space:nowrap;}
+.pend-actions .pend-resolve{color:var(--red);border-color:var(--red);}
+.pend-ctx{display:flex;gap:10px;align-items:flex-start;background:#faf7f0;border:1px solid #f0e2c4;
+  border-radius:9px;padding:9px;}
+.pend-ctx-img{cursor:zoom-in;}
+.pend-ctx-lines{font-size:12px;color:var(--dark);line-height:1.6;min-width:0;word-break:break-word;}
 .db-part-thumb.db-part-noimg{display:flex;align-items:center;justify-content:center;font-size:24px;background:#f0f0f2;color:#9ca3af;cursor:default;}
 .db-part-info{flex:1;min-width:0;}
 .db-edit-btn{flex-shrink:0;width:38px;height:38px;border-radius:9px;border:1px solid var(--border);
@@ -1522,15 +1540,16 @@ document.addEventListener('DOMContentLoaded', ()=>{
   function escDb(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   // ============================================================
   // DB VIEWER — tab-based layout
-  // Tabs: เพิ่งบันทึก | เครื่อง | อะไหล่ | รูปภาพ
+  // Tabs: รออัพเดทเข้า DB | เครื่อง | อะไหล่ | ชุดเบิก | ถังขยะ
   // ============================================================
-  let dbActiveTab = 'recent'; // recent | machines | parts | images
+  let dbActiveTab = 'pending'; // pending | machines | parts | sets | trash
+  let _pendingPartsCache = [];  // last getPendingParts result (also read by the resolve/discard handlers)
 
   function escDb(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-  function renderDbTabs(recent){
+  function renderDbTabs(pending){
     const tabs = [
-      {key:'recent',  label:`เพิ่งบันทึก (${recent.length})`},
+      {key:'pending', label:`⏳ รออัพเดทเข้า DB (${pending.length})`},
       {key:'machines',label:`เครื่อง (${lookupCache.machines.length})`},
       {key:'parts',   label:`อะไหล่ (${lookupCache.parts.length})`},
       {key:'sets',    label:`ชุดเบิก (${(lookupCache.companions||[]).length})`},
@@ -1998,25 +2017,129 @@ document.addEventListener('DOMContentLoaded', ()=>{
     setTimeout(()=>{ const i = ov.querySelector('.addp-art'); if(i) i.focus(); }, 30);
   }
 
-  function renderRecentTable(rows){
-    if(!rows || !rows.length) return '<div class="db-empty">ยังไม่มีรายการที่เพิ่งบันทึก</div>';
-    const cards = rows.map((r,i) => {
-      const detail = r.type === 'Machine'
-        ? `${escDb(r.data.CustomerName||'-')} · ${escDb(r.data.MachineType||'-')}`
-        : escDb(r.data.Description||'-');
-      return `<div class="db-card">
-        <div class="db-card-top">
-          <span class="db-card-badge">${r.type==='Machine'?'เครื่อง':'อะไหล่'}</span>
-          <span class="db-card-key">${escDb(r.key)}</span>
+  /* Parts requisitioned that aren't in "Part No." yet. Each card carries the
+     context captured at requisition time — photo, the name it was asked for by,
+     which machine, which customer — because that's what lets someone identify
+     the part and find its real Article No days later. */
+  function renderPendingTable(rows){
+    if(!rows || !rows.length){
+      return '<div class="db-empty">ไม่มีพาร์ทที่รออัพเดท 🎉<br>' +
+        '<span style="font-size:11.5px;">เมื่อเบิกพาร์ทที่ยังไม่มีใน Data Base (พิมพ์ชื่อแต่ไม่มี Article No) ระบบจะเก็บไว้ที่นี่พร้อมรูปและข้อมูลเครื่อง เพื่อรอเติมรหัสภายหลัง</span></div>';
+    }
+    const cards = rows.map(r => {
+      const img = normalizeImageUrl(r.ImageURL||'');
+      const thumb = img
+        ? `<img class="db-part-thumb pend-thumb" src="${escAttr(img)}" data-src="${escAttr(img)}" data-full="${escAttr(img)}" onerror="dbImgRetry(this)">`
+        : `<div class="db-part-thumb pend-thumb noimg">📷</div>`;
+      const machine = [r.MachineType, r.MachineNo].filter(Boolean).join(' · ') || '-';
+      const when = r.CreatedAt ? new Date(r.CreatedAt).toLocaleDateString('th-TH') : '';
+      return `<div class="pend-card">
+        ${thumb}
+        <div class="pend-main">
+          <div class="pend-name">${escDb(r.RequisitionName||'-')}</div>
+          <div class="pend-meta">👤 ${escDb(r.Customer||'-')}</div>
+          <div class="pend-meta">🖥 ${escDb(machine)}</div>
+          <div class="pend-meta pend-when">${escDb(when)}${r.RecordedBy?' · '+escDb(r.RecordedBy):''}</div>
         </div>
-        <div class="db-card-detail">${detail}</div>
-        <div class="db-card-actions">
-          <button type="button" class="db-confirm-btn" data-i="${i}">✓ ถูกต้อง</button>
-          <button type="button" class="db-del-btn" data-i="${i}">ลบ</button>
+        <div class="pend-actions">
+          <button type="button" class="btn pend-resolve" data-id="${escAttr(r.PendingId)}">✎ เติมรหัส</button>
+          <button type="button" class="db-del-btn pend-discard" data-id="${escAttr(r.PendingId)}">ลบ</button>
         </div>
       </div>`;
     }).join('');
-    return `<div class="db-card-list">${cards}</div>`;
+    return `<p style="font-size:12px;color:var(--gray);margin:0 0 10px;">พาร์ทที่เบิกไปแล้วแต่ยังไม่มีใน Data Base — เมื่อรู้ Article No แล้วกด <b>✎ เติมรหัส</b> เพื่อบันทึกเข้า Data Base</p>`
+      + `<div class="pend-list">${cards}</div>`;
+  }
+
+  /* The real Article No finally turned up → write the part into the Data Base.
+     The name it was requisitioned by is kept as a predict word, so the next
+     person who asks for it by that same name finds the real part instead of
+     queueing a duplicate. Uses the existing recordNew action to do the write. */
+  function openResolvePending(row, editor){
+    const ov = document.createElement('div');
+    ov.className = 'edit-part-modal open';
+    const img = normalizeImageUrl(row.ImageURL||'');
+    const machine = [row.MachineType, row.MachineNo].filter(Boolean).join(' · ') || '-';
+    const reqName = String(row.RequisitionName||'').trim();
+
+    ov.innerHTML = `<div class="edit-part-dialog">
+      <div class="epm-head"><span>เติมรหัส → บันทึกเข้า Data Base</span><button type="button" class="epm-x">✕</button></div>
+      <div class="epm-body">
+        <div class="epm-note">พาร์ทนี้ถูกเบิกไปแล้วแต่ยังไม่มีใน Data Base — ใส่ Article No ที่ถูกต้องเพื่อบันทึกเข้าระบบ</div>
+        <div class="epm-signed">✅ ผู้แก้ไข: <span class="who">${escDb(editor||'-')}</span></div>
+        <div class="pend-ctx">
+          ${img ? `<img class="epm-img-preview pend-ctx-img" src="${escAttr(img)}" data-src="${escAttr(img)}" data-full="${escAttr(img)}" onerror="dbImgRetry(this)">`
+                : `<div class="epm-img-preview noimg">📷</div>`}
+          <div class="pend-ctx-lines">
+            <div><b>ชื่อตอนเบิก:</b> ${escDb(reqName||'-')}</div>
+            <div><b>ลูกค้า:</b> ${escDb(row.Customer||'-')}</div>
+            <div><b>เครื่อง:</b> ${escDb(machine)}</div>
+          </div>
+        </div>
+        <label>Article No (รหัสที่ถูกต้อง) *<input type="text" class="rp-article" placeholder="เช่น 46694" autocomplete="off"></label>
+        <label>ชื่อพาร์ทที่จะบันทึก<input type="text" class="rp-name" value="${escAttr(reqName)}"></label>
+        <div class="epm-note" style="margin-top:2px;">ชื่อตอนเบิก “${escDb(reqName)}” จะถูกเก็บเป็นคำค้นหาให้อัตโนมัติ</div>
+      </div>
+      <div class="epm-actions">
+        <button type="button" class="btn rp-cancel">ยกเลิก</button>
+        <button type="button" class="btn btn-primary rp-save">บันทึกเข้า Data Base</button>
+      </div>
+    </div>`;
+    ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
+    ov.querySelector('.rp-cancel').onclick = ()=>userDismissTopModal();
+    ov.addEventListener('click', e=>{ if(e.target===ov) userDismissTopModal(); });
+    const ctxImg = ov.querySelector('.pend-ctx-img');
+    if(ctxImg) ctxImg.onclick = ()=>openImageLightbox(ctxImg.dataset.full);
+    document.body.appendChild(ov);
+    modalOpened();
+
+    const artInp = ov.querySelector('.rp-article');
+    const nameInp = ov.querySelector('.rp-name');
+    setTimeout(()=>artInp.focus(), 30);
+
+    ov.querySelector('.rp-save').onclick = async ()=>{
+      const articleNo = artInp.value.trim();
+      const partName = nameInp.value.trim() || reqName;
+      if(!articleNo){ alert('กรุณาใส่ Article No'); artInp.focus(); return; }
+      // The code may already exist — then this was just an unrecognised NAME for
+      // a part we already have, so attach the name rather than duplicate the part.
+      const dup = lookupCache.parts.find(p => String(p.ArticleNo).trim().toLowerCase() === articleNo.toLowerCase());
+      if(dup && !confirm(`รหัส #${articleNo} มีอยู่แล้วใน Data Base:\n“${dup.Description||'-'}”\n\nจะไม่สร้างพาร์ทซ้ำ แต่จะเพิ่ม “${reqName}” เป็นคำค้นหาให้พาร์ทนี้แทน — ใช่หรือไม่?`)) return;
+      const btn = ov.querySelector('.rp-save'); btn.disabled = true;
+      try{
+        if(!dup){
+          await lookupQueueOrSend('recordNew', {type:'Part', data:{
+            ArticleNo: articleNo, Description: partName, ImageURL: String(row.ImageURL||'')
+          }});
+        }
+        if(reqName && reqName.toLowerCase() !== partName.toLowerCase()){
+          await lookupQueueOrSend('recordNew', {type:'Part', data:{ ArticleNo: articleNo, Description: reqName }});
+        }
+        await lookupApiCall('deletePendingPart', { pendingId: row.PendingId });
+        _pendingPartsCache = (_pendingPartsCache||[]).filter(r => String(r.PendingId) !== String(row.PendingId));
+        flashStatus('บันทึกเข้า Data Base แล้ว: #' + articleNo);
+        userDismissTopModal();
+        await lookupSync();
+        await renderDbModal();
+      }catch(err){
+        btn.disabled = false;
+        const m = String(err.message||err);
+        alert('บันทึกไม่สำเร็จ: ' + m + (m.indexOf('Unknown action')>=0 ? '\n→ ต้อง Deploy Code.gs ใหม่ (ยังไม่มี deletePendingPart)' : ''));
+      }
+    };
+  }
+
+  async function discardPendingPart(pendingId){
+    const row = (_pendingPartsCache||[]).find(r => String(r.PendingId) === String(pendingId));
+    if(!confirm(`ลบ “${row ? row.RequisitionName : pendingId}” ออกจากคิวรออัพเดท?\n\n(ไม่ได้ลบอะไรออกจาก Data Base — พาร์ทนี้ยังไม่เคยถูกบันทึกเข้าไป)`)) return;
+    try{
+      await lookupApiCall('deletePendingPart', { pendingId });
+      _pendingPartsCache = (_pendingPartsCache||[]).filter(r => String(r.PendingId) !== String(pendingId));
+      await renderDbModal();
+    }catch(err){
+      const m = String(err.message||err);
+      alert('ลบไม่สำเร็จ: ' + m + (m.indexOf('Unknown action')>=0 ? '\n→ ต้อง Deploy Code.gs ใหม่' : ''));
+    }
   }
 
   async function deleteRecentlyAddedItem(i){
@@ -2052,14 +2175,20 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   async function renderDbModal(){
     const body = document.getElementById('dbModalBody');
-    const recent = (await lkvGet('recentlyAdded')) || [];
+    // The pending queue lives on the server so a colleague who learns the real
+    // Article No can resolve it, whatever device the part was requisitioned on.
+    let pending = _pendingPartsCache;
+    try{
+      const res = await lookupApiCall('getPendingParts', {});
+      pending = _pendingPartsCache = (res && res.rows) || [];
+    }catch(e){ /* offline / not deployed: fall back to whatever we last saw */ }
     const syncLine = lookupLastError
       ? `<div class="db-status-line err">⚠ ${escDb(lookupLastError)}</div>`
       : `<div class="db-status-line">ซิงค์ล่าสุด: ${lookupCache.syncedAt ? new Date(lookupCache.syncedAt).toLocaleString('th-TH') : '-'}</div>`;
 
     let sectionHtml = '';
-    if(dbActiveTab === 'recent'){
-      sectionHtml = renderRecentTable(recent);
+    if(dbActiveTab === 'pending'){
+      sectionHtml = renderPendingTable(pending);
     } else if(dbActiveTab === 'machines'){
       sectionHtml = `<div class="db-add-bar"><button type="button" class="db-add-btn" id="dbAddMachine"><span class="ico">＋</span> เพิ่มเครื่องใหม่</button></div>` + renderDbTable(lookupCache.machines);
     } else if(dbActiveTab === 'parts'){
@@ -2071,18 +2200,26 @@ document.addEventListener('DOMContentLoaded', ()=>{
       sectionHtml = `<p style="font-size:12px;color:var(--gray);margin:0 0 10px;">อะไหล่ที่ถูกลบ (สำรองไว้) · กด “กู้คืน” เพื่อนำกลับเข้าฐานข้อมูล</p>` + await renderRecycleBin();
     }
 
-    body.innerHTML = syncLine + renderDbTabs(recent) + `<div class="db-section-body">${sectionHtml}</div>`;
+    body.innerHTML = syncLine + renderDbTabs(pending) + `<div class="db-section-body">${sectionHtml}</div>`;
 
     // Tab switching
     body.querySelectorAll('.db-tab').forEach(btn=>{
       btn.onclick = async ()=>{ dbActiveTab = btn.dataset.tab; await renderDbModal(); };
     });
-    // Recent: confirm/delete
-    body.querySelectorAll('.db-del-btn').forEach(btn=>{
-      btn.onclick = ()=>deleteRecentlyAddedItem(+btn.dataset.i);
+    // Pending queue: fill in the code (→ Data Base) / discard
+    body.querySelectorAll('.pend-resolve').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const editor = await ensureSignedIn();
+        if(!editor) return;
+        const row = (_pendingPartsCache||[]).find(r => String(r.PendingId) === btn.dataset.id);
+        if(row) openResolvePending(row, editor);
+      };
     });
-    body.querySelectorAll('.db-confirm-btn').forEach(btn=>{
-      btn.onclick = ()=>confirmRecentlyAddedItem(+btn.dataset.i);
+    body.querySelectorAll('.pend-discard').forEach(btn=>{
+      btn.onclick = ()=>discardPendingPart(btn.dataset.id);
+    });
+    body.querySelectorAll('.pend-thumb[data-full]').forEach(el=>{
+      el.onclick = ()=>openImageLightbox(el.dataset.full);
     });
     // Parts: tap thumbnail → full-image lightbox (closes via Esc/Back/tap-outside)
     body.querySelectorAll('.db-part-thumb[data-full]').forEach(el=>{
@@ -2427,7 +2564,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   const btnViewDb = document.getElementById('btnViewDb');
   if(btnViewDb) btnViewDb.onclick = async ()=>{
-    dbActiveTab = 'recent';
+    dbActiveTab = 'pending';
     await renderDbModal();
     document.getElementById('dbModal').classList.add('open');
     modalOpened();
@@ -3717,19 +3854,32 @@ function recordCodelessPartsOnSave(){
     }
 
     // Codeless part: record to DB
+    // Codeless part: the requisitioner knows it by sight and by a local name,
+    // not by its Article No. Writing it into "Part No." with a blank code would
+    // pollute the master list and lose the context needed to identify it later,
+    // so it goes to the PendingParts queue WITH that context (photo / machine /
+    // customer) until someone can supply the real code — see the "⏳ รออัพเดทเข้า DB"
+    // tab, which promotes it into the real DB via recordNew.
     if(!desc) return;
-    const key = 'codeless:' + desc.toLowerCase();
+    const key = 'pending:' + desc.toLowerCase();
     if(submittedThisSession.has(key)) return;
     submittedThisSession.add(key);
-    const data = { ArticleNo:'', Description: desc };
+    let imageURL = '';
     const pending = pendingPartImages[desc.toLowerCase()];
     if(pending && !uploadDone){
       uploadDone = true;
       const url = await uploadPendingPartImage(pending, '', desc);
-      if(url){ data.ImageURL = url; delete pendingPartImages[desc.toLowerCase()]; }
+      if(url){ imageURL = url; delete pendingPartImages[desc.toLowerCase()]; }
     }
-    lookupQueueOrSend('recordNew', {type:'Part', data}).then(notifyRecordOutcome);
-    trackRecentlyAdded('Part', desc, Object.assign({byField:'Description'}, data));
+    lookupQueueOrSend('addPendingPart', {
+      requisitionName: desc,
+      imageURL,
+      machineNo: String(it.machineNo||''),
+      machineType: String(it.machineType||''),
+      customer: String(order.customer||''),
+      orderId: order.id,
+      recordedBy: getSessionEditor() || ''
+    });
   });
 }
 

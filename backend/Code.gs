@@ -88,6 +88,9 @@ function handleRequest(e) {
       case 'deleteCompanionSet': result = deleteCompanionSet(params); break;
       case 'recordPartUsage':    result = recordPartUsage(params); break;
       case 'getPartUsage':       result = getPartUsage(params); break;
+      case 'addPendingPart':     result = addPendingPart(params); break;
+      case 'getPendingParts':    result = getPendingParts(params); break;
+      case 'deletePendingPart':  result = deletePendingPart(params); break;
       case 'ping':          result = { success: true, time: Date.now() }; break;
       case 'debugHeaders':  result = debugHeaders(); break;
       default:              result = { success: false, error: 'Unknown action: ' + params.action };
@@ -1159,4 +1162,102 @@ function getPartUsage(params) {
     out.push(o);
   }
   return { success: true, articleNo: articleNo, rows: out };
+}
+
+// ============================================================
+// PENDING PARTS — parts that were requisitioned but aren't in "Part No." yet
+// The requisitioner usually knows the part by sight and by a local name, not by
+// its Article No. Previously those went straight into "Part No." as rows with an
+// empty Article No, which polluted the master list and threw away the context
+// (machine / customer) needed to identify them later. They're queued here
+// instead, with a photo and that context, until the real code turns up.
+// Resolving one is done by the client with the existing recordNew action, then
+// deletePendingPart — no separate "promote" action needed here.
+// ============================================================
+const PENDINGPARTS_SHEET = 'PendingParts';
+const PENDINGPARTS_HEADERS = [
+  'PendingId', 'CreatedAt', 'RequisitionName', 'ImageURL',
+  'MachineNo', 'MachineType', 'Customer', 'OrderId', 'RecordedBy'
+];
+
+function getPendingPartsSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(PENDINGPARTS_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(PENDINGPARTS_SHEET);
+    sh.appendRow(PENDINGPARTS_HEADERS);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+// Upserts by RequisitionName: the same unknown part asked for on three orders is
+// still ONE part to create, so it stays one row. The newest requisition's
+// context wins, but an existing photo is never wiped by a later blank one.
+function addPendingPart(params) {
+  const name = String((params && params.requisitionName) || '').trim();
+  if (!name) throw new Error('requisitionName required');
+
+  const sh = getPendingPartsSheet_();
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    const last = sh.getLastRow();
+    let rowNum = -1;
+    if (last > 1) {
+      const names = sh.getRange(2, 3, last - 1, 1).getValues(); // col C = RequisitionName
+      for (var i = 0; i < names.length; i++) {
+        if (String(names[i][0]).trim().toLowerCase() === name.toLowerCase()) { rowNum = i + 2; break; }
+      }
+    }
+    const isNew = rowNum === -1;
+    const pendingId = isNew ? ('p-' + Utilities.getUuid().slice(0, 8))
+                            : String(sh.getRange(rowNum, 1).getValue());
+    const row = [
+      pendingId,
+      isNew ? new Date() : (sh.getRange(rowNum, 2).getValue() || new Date()),
+      name,
+      String((params.imageURL) || '') || (isNew ? '' : String(sh.getRange(rowNum, 4).getValue() || '')),
+      String((params.machineNo) || ''),
+      String((params.machineType) || ''),
+      String((params.customer) || ''),
+      String((params.orderId) || ''),
+      String((params.recordedBy) || '')
+    ];
+    if (isNew) sh.appendRow(row);
+    else sh.getRange(rowNum, 1, 1, PENDINGPARTS_HEADERS.length).setValues([row]);
+    return { success: true, pendingId: pendingId, action: isNew ? 'added' : 'updated' };
+  } finally { try { lock.releaseLock(); } catch (e) {} }
+}
+
+function getPendingParts(params) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PENDINGPARTS_SHEET);
+  if (!sh || sh.getLastRow() < 2) return { success: true, rows: [] };
+  const values = sh.getRange(2, 1, sh.getLastRow() - 1, PENDINGPARTS_HEADERS.length).getValues();
+  const rows = [];
+  for (var i = values.length - 1; i >= 0; i--) {   // newest first
+    if (!String(values[i][0]).trim()) continue;
+    const o = {};
+    PENDINGPARTS_HEADERS.forEach(function (h, c) {
+      o[h] = values[i][c] instanceof Date ? values[i][c].toISOString() : values[i][c];
+    });
+    rows.push(o);
+  }
+  return { success: true, rows: rows };
+}
+
+function deletePendingPart(params) {
+  const id = String((params && params.pendingId) || '').trim();
+  if (!id) throw new Error('pendingId required');
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PENDINGPARTS_SHEET);
+  if (!sh || sh.getLastRow() < 2) return { success: true, action: 'noop' };
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    const ids = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+    for (var i = ids.length - 1; i >= 0; i--) {
+      if (String(ids[i][0]).trim() === id) { sh.deleteRow(i + 2); return { success: true, action: 'deleted' }; }
+    }
+    return { success: true, action: 'not_found' };
+  } finally { try { lock.releaseLock(); } catch (e) {} }
 }
