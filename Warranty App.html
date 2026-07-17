@@ -3388,6 +3388,19 @@ function ensureFmtToolbar(){
   // focus / collapses the selection being formatted
   _fmtBar.addEventListener('mousedown', e=>e.preventDefault());
   _fmtPop.addEventListener('mousedown', e=>e.preventDefault());
+  // Touch is different: the first event is touchstart, not mousedown, so the
+  // guard above never runs and the tap collapses the selection before the
+  // command applies. preventDefault on touchEND keeps the selection alive but
+  // also swallows the synthesized click — so fire the button ourselves.
+  // (touchstart must stay untouched: preventing it would kill the tap outright.)
+  [_fmtBar, _fmtPop].forEach(box=>{
+    box.addEventListener('touchend', e=>{
+      const btn = e.target.closest('button');
+      if(!btn) return;
+      e.preventDefault();
+      btn.click();
+    }, {passive:false});
+  });
   _fmtBar.querySelectorAll('.fmt-btn').forEach(b=>{
     b.onclick = ()=>{
       const cmd = b.dataset.cmd;
