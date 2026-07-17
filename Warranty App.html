@@ -392,7 +392,7 @@ details.addr-details summary{cursor:pointer;font-size:12.5px;color:var(--gray);f
 .pname-qty-row .qty-fld{flex-shrink:0;}
 .qty-inputs{display:flex;gap:6px;}
 .qty-inputs input[type=number]{border:1px solid var(--border);border-radius:7px;padding:9px 10px;font-size:14px;background:#fff;color:var(--dark);width:70px;}
-.qty-inputs select{width:52px;}
+.qty-inputs select{width:auto;min-width:62px;}
 /* locked companion rows (added via "เบิกคู่") */
 .item-row.locked{background:#fbf7ff;border-color:#e3d3f0;}
 .item-row.locked input[readonly]{background:#f4eefa;color:#555;cursor:default;}
@@ -433,6 +433,7 @@ details.addr-details summary{cursor:pointer;font-size:12.5px;color:var(--gray);f
 .photo-canvas:empty:active{background-color:#fafafa;}
 .photo-canvas:empty::before{content:'\1F4F7';font-size:30px;line-height:1;opacity:.5;}
 .photo-canvas:empty::after{content:'แตะเพื่อเพิ่มรูป';color:#9ca3af;font-size:13px;font-weight:600;}
+html[lang="en"] .photo-canvas:empty::after{content:'Tap to add photo';} /* CSS-generated text is out of the i18n walker's reach */
 .ph-img{position:absolute;border:1px solid rgba(228,29,21,.5);box-shadow:0 1px 4px rgba(0,0,0,.25);touch-action:none;}
 .ph-img img{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;user-select:none;}
 .resize-handle{position:absolute;right:-4px;bottom:-4px;width:14px;height:14px;background:var(--red);
@@ -467,7 +468,7 @@ details.addr-details summary{cursor:pointer;font-size:12.5px;color:var(--gray);f
 
 .status-msg{position:fixed;bottom:70px;left:50%;transform:translateX(-50%) translateY(10px);
   background:var(--dark);color:#fff;padding:8px 16px;border-radius:20px;font-size:13px;
-  opacity:0;transition:opacity .2s, transform .2s;pointer-events:none;z-index:70;}
+  opacity:0;transition:opacity .2s, transform .2s;pointer-events:none;z-index:300;} /* above every modal so share/save toasts stay visible */
 .status-msg.show{opacity:1;transform:translateX(-50%) translateY(0);}
 
 .history-panel{
@@ -516,8 +517,8 @@ details.addr-details summary{cursor:pointer;font-size:12.5px;color:var(--gray);f
   padding:5px 12px;font-size:12px;font-weight:600;}
 #emailDraftText{width:100%;min-height:160px;box-sizing:border-box;border:1px solid var(--border);
   border-radius:8px;padding:10px;font-size:13px;line-height:1.5;font-family:inherit;resize:vertical;color:#222;}
-/* The four actions live under the preview: decide what to do AFTER seeing the
-   PDF. 2 columns so all four fit without scrolling on a phone. */
+/* The actions live under the preview: decide what to do AFTER seeing the PDF.
+   Save PDF spans the first row; the 2-column grid keeps the rest on one screen. */
 .pm-menu{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px 12px;
   background:#fff;border-top:1px solid var(--border);flex-shrink:0;
   padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));}
@@ -530,6 +531,7 @@ details.addr-details summary{cursor:pointer;font-size:12.5px;color:var(--gray);f
 .pm-menu-item:disabled{opacity:.4;cursor:not-allowed;}
 .pm-menu-item.primary{border-color:var(--red);color:var(--red);}
 .pm-menu-item.primary:hover:not(:disabled){background:#fff5f4;border-color:var(--red);}
+.pm-menu-item.pm-full{grid-column:1 / -1;}
 
 .preview-filename{font-size:12.5px;color:var(--gray);margin-bottom:10px;word-break:break-all;}
 .preview-actions-row{display:flex;gap:10px;flex-wrap:wrap;}
@@ -654,8 +656,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
       </div>
     </div>
     <div class="pm-menu" role="menu">
-      <button class="pm-menu-item" id="pmSaveDraft" role="menuitem">💾 Save to draft</button>
-      <button class="pm-menu-item" id="pmSavePdf" role="menuitem">⬇ Save PDF</button>
+      <button class="pm-menu-item pm-full" id="pmSavePdf" role="menuitem">⬇ Save PDF</button>
       <button class="pm-menu-item primary" id="pmSendEmail" role="menuitem">✉ Send to email</button>
       <button class="pm-menu-item" id="pmShare" role="menuitem" title="ส่งไปยังแชท / แอปอื่น">📤 Share</button>
     </div>
@@ -675,6 +676,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
       <button class="tm-item" id="lookupSyncRefresh" role="menuitem" title="ซิงค์ฐานข้อมูล Machine/Part">⟳ ซิงค์</button>
       <button class="tm-item" id="btnViewDb" role="menuitem" title="ดูข้อมูล Database ที่ซิงค์มา">📋 Data Base</button>
       <button class="tm-item" id="btnNew" role="menuitem">＋ ใหม่</button>
+      <button class="tm-item" id="btnLang" role="menuitem" title="สลับภาษา UI — บิล PDF เป็นภาษาอังกฤษเสมอ">🌐 ภาษา: TH</button>
     </div>
   </div>
 </div>
@@ -706,11 +708,6 @@ table.pphoto tr td:last-child{ border-right:none !important; }
     <h2>รายการเครื่อง / อะไหล่ (สูงสุด 8 แถว)</h2>
     <div id="itemsList"></div>
     <button class="btn btn-add-row" id="btnAddRow"><span class="btn-ico">＋</span> เพิ่มรายการเครื่อง / อะไหล่</button>
-  </div>
-
-  <div class="card">
-    <h2>Comments</h2>
-    <textarea id="comments" placeholder="หมายเหตุเพิ่มเติม..."></textarea>
   </div>
 
   <div class="card" id="previewCard" style="display:none;">
@@ -1292,8 +1289,7 @@ function defaultOrder(){
     invoiceAddress: DEFAULT_ADDRESS,
     shippingAddress: DEFAULT_ADDRESS,
     customer: '',
-    items: [ {machineNo:'', machineType:'', articleNo:'', description:'', qty:1, qtyUnit:'pcs', itemDesc:'', image:null} ],
-    comments: ''
+    items: [ {machineNo:'', machineType:'', articleNo:'', description:'', qty:1, qtyUnit:'pcs', itemDesc:'', image:null} ]
   };
 }
 
@@ -3179,9 +3175,6 @@ function bindTopFields(){
   $('shippingAddress').value = order.shippingAddress;
   $('shippingAddress').oninput = e=>{ order.shippingAddress = e.target.value; };
 
-  $('comments').value = order.comments;
-  $('comments').oninput = e=>{ order.comments = e.target.value; };
-
   const prioWrap = $('priorityWrap'); prioWrap.innerHTML='';
   const prioSel = document.createElement('select');
   PRIORITIES.forEach(p=>{ const op=document.createElement('option'); op.value=p; op.textContent=p; prioSel.appendChild(op); });
@@ -3696,7 +3689,7 @@ async function renderHistory(){
   const all = await dbGetAll();
   all.sort((a,b)=>b.updatedAt - a.updatedAt);
   list.innerHTML = '';
-  if(!all.length){ list.innerHTML = '<div class="empty-hint">ยังไม่มี Draft ที่บันทึกไว้<br><span style="font-size:11.5px;">กด 📄 แล้วเลือก “Save to draft” เพื่อเก็บใบสั่งไว้ที่นี่</span></div>'; return; }
+  if(!all.length){ list.innerHTML = '<div class="empty-hint">ยังไม่มี Draft ที่บันทึกไว้<br><span style="font-size:11.5px;">กด 📄 สร้าง PDF — ใบสั่งจะถูกบันทึกเป็น Draft ให้อัตโนมัติ</span></div>'; return; }
   all.forEach(rec=>{
     const machineNos = (rec.items||[]).map(i=>i.machineNo).filter(Boolean).join(', ');
     const d = new Date(rec.updatedAt);
@@ -3895,7 +3888,7 @@ function flashStatus(msg, duration){
   clearTimeout(s._t); s._t = setTimeout(()=>s.classList.remove('show'), duration || 2400);
 }
 
-let _pdfPreviewUrl = null, _pdfPreviewFilename = 'export_order.pdf', _pdfPreviewImgData = null;
+let _pdfPreviewUrl = null, _pdfPreviewFilename = 'export_order.pdf', _pdfPreviewImgData = null, _pdfBlob = null;
 let _emailDraftText = '';
 
 function buildEmailText(ord){
@@ -3914,6 +3907,7 @@ function buildEmailText(ord){
 
 function resetPdfPreview(){
   if(_pdfPreviewUrl){ URL.revokeObjectURL(_pdfPreviewUrl); _pdfPreviewUrl = null; }
+  _pdfBlob = null;
   const card = document.getElementById('previewCard');
   if(card) card.style.display = 'none';
 }
@@ -3982,6 +3976,7 @@ async function exportPdf(){
 
     if(_pdfPreviewUrl) URL.revokeObjectURL(_pdfPreviewUrl);
     const blob = doc.output('blob');
+    _pdfBlob = blob;
     _pdfPreviewUrl = URL.createObjectURL(blob);
 
     const card = document.getElementById('previewCard');
@@ -4029,10 +4024,13 @@ function pdfSubject(){
   return [(order.type||'Warranty'), 'Part Order', order.customer ? '- '+order.customer : '']
     .filter(Boolean).join(' ').trim();
 }
-async function currentPdfFile(){
+/* Synchronous on purpose: navigator.share() only works inside the tap's user
+   gesture, and awaiting a fetch first eats that gesture on mobile browsers —
+   the share sheet then silently never opens. The blob is kept from export. */
+function currentPdfFile(){
   try{
-    const blob = await (await fetch(_pdfPreviewUrl)).blob();
-    return new File([blob], _pdfPreviewFilename || 'export_order.pdf', { type:'application/pdf' });
+    if(!_pdfBlob) return null;
+    return new File([_pdfBlob], _pdfPreviewFilename || 'export_order.pdf', { type:'application/pdf' });
   }catch(e){ return null; }
 }
 
@@ -4043,7 +4041,7 @@ async function emailCurrentPdf(){
   if(!_pdfPreviewUrl) return;
   const subject = pdfSubject();
   const body = _emailDraftText || '';
-  const file = await currentPdfFile();
+  const file = currentPdfFile();
 
   if(file && navigator.canShare && navigator.canShare({ files:[file] })){
     try{ await navigator.share({ files:[file], title: subject, text: body }); commitPdfAction(); return; }
@@ -4064,7 +4062,7 @@ async function emailCurrentPdf(){
    can't share files has nothing to hand the PDF to but a download. */
 async function sharePdf(){
   if(!_pdfPreviewUrl) return;
-  const file = await currentPdfFile();
+  const file = currentPdfFile();
   if(file && navigator.canShare && navigator.canShare({ files:[file] })){
     try{ await navigator.share({ files:[file], title: pdfSubject(), text: _emailDraftText || '' }); commitPdfAction(); }
     catch(err){ if(!(err && err.name === 'AbortError')) flashStatus('แชร์ไม่สำเร็จ: ' + (err && err.message ? err.message : err), 5000); }
@@ -4082,11 +4080,6 @@ function savePdfToDevice(){
   flashStatus('ดาวน์โหลด PDF แล้ว');
 }
 
-/* Just keep it as a draft — no PDF leaves the app, so nothing is logged. */
-async function saveDraftFromPreview(){
-  await saveOrder();
-  userDismissTopModal();
-}
 
 /* ---------------- modal dismissal: Esc (desktop), Back button (mobile), tap-outside ----------------
    Each opened modal pushes one history entry so the phone Back button pops it; Esc / a backdrop tap
@@ -4128,6 +4121,314 @@ window.addEventListener('keydown', (e)=>{
   if(e.key!=='Escape') return;
   if(closeTopMenu()){ e.preventDefault(); return; }   // ☰ menu is the lightest layer
   if(_modalDepth>0){ e.preventDefault(); userDismissTopModal(); }
+});
+
+/* ---- UI language toggle: TH (native) / EN ----
+   Dictionary-driven: every rendered text node / placeholder / title is matched
+   against TH_EN (exact) then TH_EN_RULES (patterns for interpolated strings).
+   Unmatched strings simply stay Thai, so partial coverage never breaks the UI.
+   #printRoot (the A4 bill) and <script>/<style> are NEVER touched — the PDF is
+   English by design regardless of the UI language. A MutationObserver keeps
+   re-rendered DOM translated; originals are kept in WeakMaps so switching back
+   to TH restores them without a reload. */
+const UI_LANG_KEY = 'uiLang';
+let uiLang = 'th';
+try{ uiLang = localStorage.getItem(UI_LANG_KEY) === 'en' ? 'en' : 'th'; }catch(e){}
+
+const TH_EN = {
+  // ☰ top bar
+  'เมนู':'Menu',
+  '⟳ ซิงค์':'⟳ Sync',
+  '＋ ใหม่':'＋ New',
+  'ซิงค์ฐานข้อมูล Machine/Part':'Sync the Machine/Part database',
+  'ดูข้อมูล Database ที่ซิงค์มา':'View the synced Database',
+  'สลับภาษา UI — บิล PDF เป็นภาษาอังกฤษเสมอ':'Switch UI language — the PDF bill is always English',
+  // main form
+  'ข้อมูลหลัก':'Main Info',
+  'กำลังเชื่อมต่อฐานข้อมูล...':'Connecting to database...',
+  'กำลังซิงค์ฐานข้อมูล...':'Syncing database...',
+  'ที่อยู่ออกบิล / จัดส่ง (ค่าเริ่มต้น แก้ไขได้)':'Invoice / shipping address (defaults, editable)',
+  'รายการเครื่อง / อะไหล่ (สูงสุด 8 แถว)':'Machines / parts (max 8 rows)',
+  'เพิ่มรายการเครื่อง / อะไหล่':'Add machine / part row',
+  'PDF พร้อมแล้ว':'PDF is ready',
+  'เปิดดู PDF':'Open PDF',
+  'ดาวน์โหลด PDF':'Download PDF',
+  'เปิดไม่ขึ้น/หาไม่เจอ? ลองกด "ดาวน์โหลด PDF" แล้วเปิดจากโฟลเดอร์ดาวน์โหลดในเครื่องได้เลย':'Can\'t open / find it? Tap "Download PDF" and open it from your Downloads folder.',
+  'สร้าง PDF A4 แล้วเลือกบันทึก / ส่ง':'Create the A4 PDF, then choose save / send',
+  'สร้าง PDF A4 แล้วเลือกบันทึก หรือ ส่ง':'Create the A4 PDF, then choose save or send',
+  '- เลือกลูกค้า -':'- Select customer -',
+  '- เลือกรุ่นเครื่อง -':'- Select machine type -',
+  '- เลือก/พิมพ์ชื่อลูกค้า -':'- Select / type customer -',
+  '- เลือก/พิมพ์รุ่นเครื่อง -':'- Select / type machine type -',
+  // item rows
+  'ลบ':'Delete',
+  'ลบแถว':'Delete row',
+  '🔒 พาร์ทแนะนำ (แก้ Qty ได้)':'🔒 Suggested part (Qty editable)',
+  'รูปอะไหล่':'Part photo',
+  'เพิ่มรูป':'Add photo',
+  'เปลี่ยนรูป':'Change photo',
+  'ลบรูป':'Remove photo',
+  '· จากฐานข้อมูล':'· from database',
+  '· รูปใหม่ (บันทึกเข้า DB ตอนกดบันทึก)':'· new photo (saved to DB on save)',
+  'ปรับขนาด (คงสัดส่วน)':'Resize (keeps aspect ratio)',
+  '+ เพิ่มชื่อเรียกอื่น':'+ Add another name',
+  'พิมพ์ชื่อเรียกอื่นที่ใช้เรียกอะไหล่นี้':'Type another name used for this part',
+  'บันทึก':'Save',
+  'บันทึกชื่อเรียกใหม่แล้ว ✓':'New name saved ✓',
+  // PDF preview modal
+  'ร่างอีเมล':'Email draft',
+  'คัดลอก':'Copy',
+  'คัดลอกแล้ว ✓':'Copied ✓',
+  'ส่งไปยังแชท / แอปอื่น':'Send to a chat / another app',
+  // companion (suggested-set) prompt
+  'ไม่':'No',
+  'ใช่ เพิ่มให้เลย':'Yes, add them',
+  'รายการเหล่านี้จะถูกเพิ่มเป็นแถวใหม่ (ล็อกแก้ไข) โดยใช้ Machine No/Type เดียวกัน':'These will be added as new rows (locked) using the same Machine No/Type',
+  // Draft panel
+  '(ไม่มีลูกค้า)':'(no customer)',
+  'เปิด':'Open',
+  'ยังไม่มี Draft ที่บันทึกไว้':'No saved drafts yet',
+  'กด 📄 สร้าง PDF — ใบสั่งจะถูกบันทึกเป็น Draft ให้อัตโนมัติ':'Tap 📄 to create a PDF — the order is saved as a Draft automatically',
+  // DB viewer
+  'ข้อมูล Database':'Database',
+  '⟳ ซิงค์ใหม่':'⟳ Re-sync',
+  '🗑 ถังขยะ':'🗑 Recycle bin',
+  'ไม่มีข้อมูล (0 แถว)':'No data (0 rows)',
+  'แตะเพื่อดูรูปเต็ม':'Tap to view full image',
+  'ดูรูปเต็ม':'View full image',
+  'ยังไม่มีรูป':'No image yet',
+  'ยังไม่มีคำค้นหาอื่น':'No other search words yet',
+  'แก้ไข':'Edit',
+  'เพิ่มเครื่องใหม่':'Add new machine',
+  '➕ เพิ่มเครื่องใหม่':'➕ Add new machine',
+  'เพิ่มอะไหล่ใหม่':'Add new part',
+  '➕ เพิ่มอะไหล่ใหม่':'➕ Add new part',
+  'เพิ่มชุดเบิก':'Add part set',
+  'แก้ไขชุดเบิก':'Edit part set',
+  'แตะรูปเพื่อดูเต็ม · กด ✎ เพื่อแก้ไขอะไหล่':'Tap an image to view it · press ✎ to edit a part',
+  'ชุดพาร์ทที่ต้องเบิกด้วยกัน · ⭐ = พาร์ทหลัก (ตัวกระตุ้น) · แตะรูปเพื่อดูเต็ม':'Part sets requisitioned together · ⭐ = main part (trigger) · tap an image to view it',
+  'อะไหล่ที่ถูกลบ (สำรองไว้) · กด “กู้คืน” เพื่อนำกลับเข้าฐานข้อมูล':'Deleted parts (backed up) · press “Restore” to return one to the database',
+  'ถังขยะว่าง — ยังไม่มีอะไหล่ที่ถูกลบ':'Recycle bin is empty — no deleted parts yet',
+  '↩ กู้คืน':'↩ Restore',
+  'ยังไม่มีชุดเบิก — กด “เพิ่มชุดเบิก” เพื่อสร้าง':'No part sets yet — press “Add part set” to create one',
+  // set editor
+  'ชื่อชุด (จำเป็น)':'Set name (required)',
+  'เช่น WATERFILTER POLYMER':'e.g. WATERFILTER POLYMER',
+  'รูปรวมพาร์ท':'Combined image',
+  'พาร์ทในชุด — พาร์ทแรก (⭐) = หลัก/ตัวกระตุ้น':'Parts in set — first part (⭐) = main/trigger',
+  'เพิ่มพาร์ทจาก DB':'Add part from DB',
+  'พิมพ์ค้นหา รหัส/ชื่อ แล้วกด Add':'Search code/name, then press Add',
+  'ลบชุด':'Delete set',
+  'ลบออกจากชุด':'Remove from set',
+  'ตั้งเป็นพาร์ทหลัก':'Set as main part',
+  '⭐ หลัก':'⭐ Main',
+  'เพิ่มแล้ว':'Added',
+  'ไม่พบพาร์ท':'No parts found',
+  'ยังไม่มีพาร์ทในชุด':'No parts in this set yet',
+  'ยังไม่มีพาร์ท':'No parts yet',
+  '(ไม่มีชื่อ)':'(unnamed)',
+  'แก้ไขชุด':'Edit set',
+  // pending-update queue
+  '✎ เติมรหัส':'✎ Fill in code',
+  'เติมรหัส → บันทึกเข้า Data Base':'Fill in code → save to Data Base',
+  'บันทึกเข้า Data Base':'Save to Data Base',
+  'ชื่อตอนเบิก:':'Requisitioned as:',
+  'ลูกค้า:':'Customer:',
+  'เครื่อง:':'Machine:',
+  'Article No (รหัสที่ถูกต้อง) *':'Article No (correct code) *',
+  'ชื่อพาร์ทที่จะบันทึก':'Part name to save',
+  'ไม่มีพาร์ทที่รออัพเดท 🎉':'No parts pending update 🎉',
+  'เมื่อเบิกพาร์ทที่ยังไม่มีใน Data Base (พิมพ์ชื่อแต่ไม่มี Article No) ระบบจะเก็บไว้ที่นี่พร้อมรูปและข้อมูลเครื่อง เพื่อรอเติมรหัสภายหลัง':'When a part not yet in the Data Base is requisitioned (typed by name, no Article No) it is kept here with its photo and machine info until the code is filled in',
+  'พาร์ทที่เบิกไปแล้วแต่ยังไม่มีใน Data Base — เมื่อรู้ Article No แล้วกด':'Parts already requisitioned but not yet in the Data Base — once the Article No is known, press',
+  'เพื่อบันทึกเข้า Data Base':'to save it to the Data Base',
+  'พาร์ทนี้ถูกเบิกไปแล้วแต่ยังไม่มีใน Data Base — ใส่ Article No ที่ถูกต้องเพื่อบันทึกเข้าระบบ':'This part was requisitioned but is not in the Data Base yet — enter the correct Article No to save it',
+  // sign-in / audited edit
+  'ลงชื่อเข้าใช้เพื่อแก้ไข':'Sign in to edit',
+  'กรุณาลงชื่อผู้แก้ไขก่อนเข้าหน้าแก้ไขอะไหล่':'Please sign in before opening the part editor',
+  'ชื่อนี้จะถูกบันทึกไว้ในประวัติการแก้ไข':'This name is recorded in the edit history',
+  'ชื่อผู้แก้ไข':'Editor name',
+  'พิมพ์ชื่อของคุณ':'Type your name',
+  'ยกเลิก':'Cancel',
+  'เข้าสู่ระบบ':'Sign in',
+  'เปลี่ยนผู้ใช้':'Change user',
+  '✅ ผู้แก้ไข:':'✅ Editor:',
+  'แก้ไขอะไหล่':'Edit part',
+  'บันทึกการแก้ไข':'Save changes',
+  'Article No (รหัส)':'Article No (code)',
+  'Description (รายละเอียด)':'Description',
+  'Predict words (คำค้นหา)':'Predict words (search terms)',
+  'Predict Word (คำค้นหา)':'Predict Word (search term)',
+  'Part Name (ชื่ออะไหล่)':'Part Name',
+  'ชื่ออะไหล่':'Part name',
+  'รหัสอะไหล่':'Part code',
+  'เช่น M-2401':'e.g. M-2401',
+  'เช่น 46694':'e.g. 46694',
+  'เพิ่มคำค้นหา':'Add search word',
+  'เพิ่ม':'Add',
+  'ยังไม่มีคำค้นหา':'No search words yet',
+  'ลบคำนี้':'Remove this word',
+  'บันทึกอะไหล่':'Save part',
+  'บันทึกเครื่อง':'Save machine',
+  '👁 ประวัติการเบิก (ใช้ไปที่ไหนบ้าง)':'👁 Usage history (where it went)',
+  'ดูประวัติการเบิกของพาร์ทนี้':'View this part\'s usage history',
+  '🕘 ประวัติ / กู้คืนข้อมูล':'🕘 History / restore',
+  '🗑 ลบอะไหล่นี้ (ย้ายไปถังขยะ)':'🗑 Delete this part (move to recycle bin)',
+  '← กลับไปแก้ไข':'← Back to edit',
+  'ยังไม่มีประวัติการแก้ไข':'No edit history yet',
+  '↩ กู้คืนเป็นค่านี้':'↩ Restore to this version',
+  'ปิด':'Close',
+  'กำลังโหลด...':'Loading...',
+  'ระบบจะสำรองข้อมูลเดิม (พร้อมชื่อผู้แก้ไข) ก่อนบันทึกทุกครั้ง และกู้คืนได้':'The previous data (with the editor name) is backed up before every save, and can be restored',
+  'กรอกอะไหล่ 1 รายการ · แนบรูปของอะไหล่ได้ · กด':'Enter 1 part · a photo can be attached · press',
+  'เพื่อเพิ่ม Predict Word ได้หลายคำ (รูป/คำค้นหา ต้องมี Article No.)':'to add several Predict Words (photo/search words need an Article No.)',
+  '＋ เพิ่มคำค้นหา':'＋ Add search word',
+  // usage history
+  'ยังไม่มีประวัติการเบิก':'No usage history yet',
+  'ระบบเริ่มเก็บตั้งแต่ตอนกด “✉ Export PDF → Email” (ไม่ได้เก็บย้อนหลังใบเก่า)':'Recording starts from the “✉ Export PDF → Email” action (older orders are not backfilled)',
+  'เบิกไปแล้ว':'Requisitioned',
+  'ครั้ง · รวม':'times · total',
+  'ชิ้น/ชุด':'pcs/sets',
+  'ใส่ Article No ก่อน จึงจะดูประวัติการเบิกได้':'Enter an Article No first to view its usage history',
+  // common toasts
+  'ดาวน์โหลด PDF แล้ว':'PDF downloaded',
+  'ดาวน์โหลด PDF แล้ว — แนบไฟล์ลงอีเมลที่เปิดขึ้น':'PDF downloaded — attach it to the email that just opened',
+  'เบราว์เซอร์นี้ส่งไฟล์ต่อให้แอปอื่นไม่ได้ — ดาวน์โหลด PDF ให้แล้ว ส่งต่อเองได้เลย':'This browser can\'t hand files to other apps — the PDF was downloaded, share it yourself',
+  'บันทึกแล้ว':'Saved',
+  'บันทึกแล้ว (ชั่วคราว - เบราว์เซอร์นี้ไม่รองรับการบันทึกถาวร)':'Saved (temporarily - this browser does not support permanent storage)',
+  'กำลังอัปโหลดรูป...':'Uploading image...',
+  'อัปโหลดรูปแล้ว':'Image uploaded',
+  'กำลังเตรียมรูป...':'Preparing image...',
+  'แนบรูปแล้ว (กดบันทึกเพื่อยืนยัน)':'Image attached (press Save to confirm)',
+  'เตรียมรูปไม่สำเร็จ':'Could not prepare the image',
+  'ใส่รูปจากฐานข้อมูลให้อัตโนมัติ':'Auto-filled the image from the database',
+  'ใส่รูปรวมของชุดให้พาร์ทหลักแล้ว':'Set the combined image on the main part',
+  'บันทึกเข้า Data Base แล้ว:':'Saved to Data Base:',
+  'กู้คืนอะไหล่แล้ว':'Part restored',
+  'กู้คืนข้อมูลแล้ว':'Data restored',
+  'บันทึกชุดเบิกแล้ว':'Part set saved',
+  'ลบชุดเบิกแล้ว':'Part set deleted',
+  'ไม่พบอะไหล่':'Part not found'
+};
+
+/* Patterns for strings with interpolated data. Anchored so a translated result
+   can never re-match (the observer would otherwise loop). Replacement may be a
+   string or a function, exactly as String.replace accepts. */
+const TH_EN_RULES = [
+  [/^แถวที่ (\d+)/, 'Row $1'],
+  [/^⏳ รออัพเดทเข้า DB \((\d+)\)$/, '⏳ Pending DB update ($1)'],
+  [/^เครื่อง \((\d+)\)$/, 'Machines ($1)'],
+  [/^อะไหล่ \((\d+)\)$/, 'Parts ($1)'],
+  [/^ชุดเบิก \((\d+)\)$/, 'Part sets ($1)'],
+  [/^\.\.\.และอีก (\d+) แถว \(แสดงแค่ 100 แถวแรก\)$/, '...and $1 more rows (showing first 100)'],
+  [/^ซิงค์ล่าสุด: (.*)$/, 'Last synced: $1'],
+  [/^อัปเดตล่าสุด (.+) · เครื่อง (\d+) \/ อะไหล่ (\d+)$/, 'Updated $1 · Machines $2 / Parts $3'],
+  [/^ซิงค์ไม่สำเร็จ: (.*)$/, 'Sync failed: $1'],
+  [/^แชร์ไม่สำเร็จ: (.*)$/, 'Share failed: $1'],
+  [/^บันทึกไม่สำเร็จ: (.*)$/, 'Save failed: $1'],
+  [/^อัปโหลดรูปไม่สำเร็จ: (.*)$/, 'Image upload failed: $1'],
+  [/^โหลดไม่สำเร็จ: (.*)$/, 'Load failed: $1'],
+  [/^พาร์ทที่แนะนำให้เบิกคู่กับ #(.+)$/, 'Parts suggested to requisition together with #$1'],
+  [/^ประวัติการเบิก #(.+)$/, 'Usage history #$1'],
+  [/^ประวัติ #(.+)$/, 'History #$1'],
+  [/^ชื่อตอนเบิก “(.+)” จะถูกเก็บเป็นคำค้นหาให้อัตโนมัติ$/, 'The requisition name “$1” will be saved as a search word automatically'],
+  [/^ลบเมื่อ (.+) · โดย (.+)$/, 'Deleted $1 · by $2'],
+  [/^จำนวน (.+)$/, (m,p1)=>'Qty ' + p1.replace(' · ชุด: ', ' · set: ')],
+  [/^เพิ่มเครื่องแล้ว: (.*)$/, 'Machine added: $1'],
+  [/^เพิ่มอะไหล่แล้ว: (.*)$/, 'Part added: $1'],
+  [/^บันทึกเข้า Data Base แล้ว: (.*)$/, 'Saved to Data Base: $1']
+];
+
+const _i18nTextOrig = new WeakMap();   // Text node -> original Thai string
+const _i18nAttrOrig = new WeakMap();   // Element   -> { attrName: original }
+const I18N_ATTRS = ['placeholder','title','aria-label'];
+
+function translateTh(s){
+  const key = (s||'').trim();
+  if(!key || !/[ก-๙]/.test(key)) return null;
+  if(Object.prototype.hasOwnProperty.call(TH_EN, key)) return s.replace(key, TH_EN[key]);
+  for(const [re, rep] of TH_EN_RULES){
+    if(re.test(key)) return s.replace(key, key.replace(re, rep));
+  }
+  return null;
+}
+function i18nSkip(el){
+  if(!el) return false;
+  const tag = el.tagName;
+  if(tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return true;
+  return !!(el.closest && el.closest('#printRoot'));
+}
+function i18nTextNode(n){
+  const t = translateTh(n.nodeValue);
+  if(t !== null && t !== n.nodeValue){
+    if(!_i18nTextOrig.has(n)) _i18nTextOrig.set(n, n.nodeValue);
+    n.nodeValue = t;
+  }
+}
+function i18nAttrs(el){
+  if(i18nSkip(el) || !el.getAttribute) return;
+  I18N_ATTRS.forEach(a=>{
+    const v = el.getAttribute(a);
+    if(v == null) return;
+    const t = translateTh(v);
+    if(t !== null && t !== v){
+      let bag = _i18nAttrOrig.get(el);
+      if(!bag){ bag = {}; _i18nAttrOrig.set(el, bag); }
+      if(!(a in bag)) bag[a] = v;
+      el.setAttribute(a, t);
+    }
+  });
+}
+function applyI18n(root){
+  if(uiLang !== 'en' || !root) return;
+  if(root.nodeType === 3){ if(!i18nSkip(root.parentElement)) i18nTextNode(root); return; }
+  if(root.nodeType !== 1 || i18nSkip(root)) return;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: n => i18nSkip(n.parentElement) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+  });
+  const nodes = [];
+  while(w.nextNode()) nodes.push(w.currentNode);
+  nodes.forEach(i18nTextNode);
+  i18nAttrs(root);
+  root.querySelectorAll('[placeholder],[title],[aria-label]').forEach(i18nAttrs);
+}
+function revertI18n(){
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while(w.nextNode()) nodes.push(w.currentNode);
+  nodes.forEach(n=>{ if(_i18nTextOrig.has(n)){ n.nodeValue = _i18nTextOrig.get(n); _i18nTextOrig.delete(n); } });
+  document.querySelectorAll('[placeholder],[title],[aria-label]').forEach(el=>{
+    const bag = _i18nAttrOrig.get(el);
+    if(!bag) return;
+    Object.keys(bag).forEach(a=>el.setAttribute(a, bag[a]));
+    _i18nAttrOrig.delete(el);
+  });
+}
+const _i18nObserver = new MutationObserver(muts=>{
+  if(uiLang !== 'en') return;
+  for(const mu of muts){
+    if(mu.type === 'characterData'){ if(!i18nSkip(mu.target.parentElement)) i18nTextNode(mu.target); }
+    else if(mu.addedNodes) mu.addedNodes.forEach(applyI18n);
+  }
+});
+function updateLangBtn(){
+  const b = document.getElementById('btnLang');
+  if(b) b.textContent = uiLang === 'en' ? '🌐 Language: EN' : '🌐 ภาษา: TH';
+}
+function setUiLang(l){
+  uiLang = (l === 'en') ? 'en' : 'th';
+  try{ localStorage.setItem(UI_LANG_KEY, uiLang); }catch(e){}
+  document.documentElement.lang = uiLang;
+  if(uiLang === 'en') applyI18n(document.body);
+  else revertI18n();
+  updateLangBtn();
+}
+document.addEventListener('DOMContentLoaded', ()=>{
+  const b = document.getElementById('btnLang');
+  if(b) b.onclick = ()=>setUiLang(uiLang === 'en' ? 'th' : 'en');
+  document.documentElement.lang = uiLang;
+  updateLangBtn();
+  _i18nObserver.observe(document.body, { childList:true, subtree:true, characterData:true });
+  if(uiLang === 'en') applyI18n(document.body);
 });
 
 /* ---- ☰ top-bar menu (Draft / ซิงค์ / Data Base / ใหม่) ----
@@ -4230,7 +4531,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
     fab.disabled = true;
     try{ await exportPdf(); } finally { fab.disabled = false; }
   };
-  document.getElementById('pmSaveDraft').onclick = saveDraftFromPreview;
   document.getElementById('pmSavePdf').onclick = savePdfToDevice;
   document.getElementById('pmSendEmail').onclick = emailCurrentPdf;
   document.getElementById('pmShare').onclick = sharePdf;
