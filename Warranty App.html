@@ -722,10 +722,10 @@ table.pphoto tr td:last-child{ border-right:none !important; }
       <div class="tm-sep" role="separator"></div>
       <!-- ตั้งค่า -->
       <button class="tm-item" id="btnLang" role="menuitem" title="สลับภาษา UI — บิล PDF เป็นภาษาอังกฤษเสมอ">🌐 ภาษา: TH</button>
+      <button class="tm-item" id="btnRunNumEdit" role="menuitem" style="display:none;" title="แก้เลขที่เอกสาร — ใช้ได้เมื่อ Running number เปิดอยู่">✏️ แก้เลขที่เอกสาร</button>
       <button class="tm-item" id="btnPowerUser" role="menuitem" title="ล็อกอินเพื่อเปิด-ปิดฟังก์ชันขั้นสูง">🔑 Power User</button>
       <button class="tm-item" id="btnFmtToggle" role="menuitem" style="display:none;" title="เปิด-ปิด toolbar จัดข้อความ (B/I/U/สี) ในช่อง Description">🛠 Format toolbar: ปิด</button>
       <button class="tm-item" id="btnRunNumToggle" role="menuitem" style="display:none;" title="เปิด-ปิดการรันเลขที่เอกสาร (TL{ปี}-{เลข}) — ตั้งค่าเป็นกลาง มีผลกับทุกคน">🔢 Running number: ปิด</button>
-      <button class="tm-item" id="btnRunNumEdit" role="menuitem" style="display:none;" title="แก้เลขรันถัดไป (มีผลกับทุกคน)">✏️ แก้เลขรันถัดไป</button>
     </div>
   </div>
 </div>
@@ -1557,20 +1557,22 @@ function renderRunNumber(){
       chip.title = assigned ? 'เลขที่เอกสาร' : 'เลขรันถัดไป';
     }
   }
-  // The one place to edit the number: the Power User menu item. Its label +
-  // action follow the current order (edit this Draft's own number, or — for a
-  // fresh order with no number yet — the shared next number).
+  // The one place to edit the number: the ☰ menu item. It is NOT gated behind
+  // the Power-User login — once the feature is active it is available to
+  // everyone (and stays available after an admin logs out). Its label + action
+  // follow the current order (edit this Draft's own number, or — for a fresh
+  // order with no number yet — the shared next number).
   if(re){
-    const show = on && isPowerUser();
-    re.style.display = show ? '' : 'none';
+    re.style.display = on ? '' : 'none';
     re.textContent = assigned ? ('✏️ แก้เลขใบนี้ (' + assigned + ')')
                               : ('✏️ แก้เลขรันถัดไป (' + runNumberPreview() + ')');
-    re.onclick = show ? (()=>{ if(assigned) editThisOrderNumber(); else editRunningNumber(); }) : null;
+    re.onclick = on ? (()=>{ if(assigned) editThisOrderNumber(); else editRunningNumber(); }) : null;
   }
 }
-/* Edit the SHARED next number (affects everyone who exports next). */
+/* Edit the SHARED next number (affects everyone who exports next). Available to
+   anyone from the ☰ menu while the feature is active — not Power-User gated. */
 async function editRunningNumber(){
-  if(!isPowerUser() || !runNumberEnabled()) return;
+  if(!runNumberEnabled()) return;
   const inp = prompt('ตั้งเลขรันถัดไป (เฉพาะตัวเลข) — มีผลกับทุกคน\nรูปแบบ: ' + String(appSettings.runPrefix||'TL') + appSettings.runYear + '-XXX', String(appSettings.runNext));
   if(inp == null) return;
   const n = parseInt(String(inp).replace(/[^0-9]/g,''), 10);
@@ -1581,7 +1583,7 @@ async function editRunningNumber(){
 /* Edit only THIS Draft's already-assigned number (does not touch the shared
    counter). Keeps the existing prefix/year, swaps the numeric tail. */
 async function editThisOrderNumber(){
-  if(!isPowerUser() || typeof order === 'undefined') return;
+  if(typeof order === 'undefined') return;
   const cur = String(order.exportNo || '');
   const m = cur.match(/^(.*?)(\d{4})-(\d+)$/);
   const inp = prompt('แก้เลขรันของ Draft นี้ (เฉพาะตัวเลข — ไม่กระทบเลขกลาง)\n' + (m ? m[1] + m[2] + '-' : ''), m ? m[3] : '');
@@ -4334,13 +4336,19 @@ async function recordOrderPartUsage(){
 }
 
 async function exportPdf(){
-  try{ await ensureExportNumber(); } catch(e){ console.error(e); }  // assign the running number before the PDF is built
-  try{ await saveOrder(); } catch(e){ console.error(e); }
-
   try{
     if(!window.jspdf || !window.jspdf.jsPDF) throw new Error('ไม่พบไลบรารี jsPDF (jspdf.jsPDF undefined)');
     if(typeof html2canvas !== 'function') throw new Error('ไม่พบไลบรารี html2canvas');
     ensureSarabunFontFace();
+
+    // Assign the running number only now — once we know a PDF is actually going
+    // to be produced (libraries present). It is not consumed merely by opening a
+    // preview of an already-built PDF, and a re-export of the same order reuses
+    // the number it already has. The number must be embedded in the rendered
+    // HTML, so it is reserved just before the render (which is also what the
+    // share flow needs — the sendable blob has to exist before the tap gesture).
+    try{ await ensureExportNumber(); } catch(e){ console.error(e); }
+    try{ await saveOrder(); } catch(e){ console.error(e); }
 
     const root = document.getElementById('printRoot');
     root.innerHTML = buildPrintHtml(order);
