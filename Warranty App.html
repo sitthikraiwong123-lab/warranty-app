@@ -653,9 +653,9 @@ table.pphoto tr td:last-child{ border-right:none !important; }
   <div class="topbar-actions">
     <button class="btn btn-menu" id="btnMenu" aria-label="เมนู" aria-haspopup="true" aria-expanded="false" aria-controls="topMenu">☰</button>
     <div class="top-menu" id="topMenu" role="menu" aria-labelledby="btnMenu">
-      <button class="tm-item" id="btnHistory" role="menuitem">🕘 ประวัติ</button>
+      <button class="tm-item" id="btnHistory" role="menuitem">📝 Draft</button>
       <button class="tm-item" id="lookupSyncRefresh" role="menuitem" title="ซิงค์ฐานข้อมูล Machine/Part">⟳ ซิงค์</button>
-      <button class="tm-item" id="btnViewDb" role="menuitem" title="ดูข้อมูล Database ที่ซิงค์มา">📋 ดู DB</button>
+      <button class="tm-item" id="btnViewDb" role="menuitem" title="ดูข้อมูล Database ที่ซิงค์มา">📋 Data Base</button>
       <button class="tm-item" id="btnNew" role="menuitem">＋ ใหม่</button>
     </div>
   </div>
@@ -713,7 +713,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
 
 <div class="history-panel" id="historyPanel">
   <div class="hist-head">
-    <h2>ประวัติ</h2>
+    <h2>Draft</h2>
     <button id="btnCloseHistory">×</button>
   </div>
   <div class="history-list" id="historyList"></div>
@@ -3559,7 +3559,7 @@ async function renderHistory(){
   const all = await dbGetAll();
   all.sort((a,b)=>b.updatedAt - a.updatedAt);
   list.innerHTML = '';
-  if(!all.length){ list.innerHTML = '<div class="empty-hint">ยังไม่มีประวัติที่บันทึกไว้</div>'; return; }
+  if(!all.length){ list.innerHTML = '<div class="empty-hint">ยังไม่มี Draft ที่บันทึกไว้<br><span style="font-size:11.5px;">กด 📄 แล้วเลือก “Save to draft” เพื่อเก็บใบสั่งไว้ที่นี่</span></div>'; return; }
   all.forEach(rec=>{
     const machineNos = (rec.items||[]).map(i=>i.machineNo).filter(Boolean).join(', ');
     const d = new Date(rec.updatedAt);
@@ -3602,7 +3602,7 @@ async function loadOrder(id){
   toggleHistory(false);
 }
 async function deleteOrder(id){
-  if(!confirm('ลบประวัตินี้ถาวร แน่ใจหรือไม่?')) return;
+  if(!confirm('ลบ Draft นี้ถาวร แน่ใจหรือไม่?')) return;
   await dbDelete(id);
   if(order.id===id){ order = defaultOrder(); fullRender(); }
   renderHistory();
@@ -3980,7 +3980,7 @@ window.addEventListener('keydown', (e)=>{
   if(_modalDepth>0){ e.preventDefault(); userDismissTopModal(); }
 });
 
-/* ---- ☰ top-bar menu (ประวัติ / ซิงค์ / ดู DB / ใหม่) ----
+/* ---- ☰ top-bar menu (Draft / ซิงค์ / Data Base / ใหม่) ----
    The items keep their original ids, so their existing handlers are untouched. */
 function closeTopMenu(){
   const m = document.getElementById('topMenu');
