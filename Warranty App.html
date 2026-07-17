@@ -716,6 +716,8 @@ table.pphoto tr td:last-child{ border-right:none !important; }
       <div class="tm-sep" role="separator"></div>
       <!-- ตั้งค่า -->
       <button class="tm-item" id="btnLang" role="menuitem" title="สลับภาษา UI — บิล PDF เป็นภาษาอังกฤษเสมอ">🌐 ภาษา: TH</button>
+      <button class="tm-item" id="btnPowerUser" role="menuitem" title="ล็อกอินเพื่อเปิด-ปิดฟังก์ชันขั้นสูง">🔑 Power User</button>
+      <button class="tm-item" id="btnFmtToggle" role="menuitem" style="display:none;" title="เปิด-ปิด toolbar จัดข้อความ (B/I/U/สี) ในช่อง Description">🛠 Format toolbar: ปิด</button>
     </div>
   </div>
 </div>
@@ -3416,6 +3418,10 @@ function ensureFmtToolbar(){
 }
 
 function fmtSyncToSelection(){
+  // Feature-flagged: OFF by default; a Power User flips it from the ☰ menu.
+  // This is the single choke point — the toolbar only ever appears from here.
+  // Paste sanitizing in initRichField stays active regardless (security).
+  if(!fmtToolbarOn()){ fmtHideAll(); return; }
   const sel = window.getSelection();
   if(!sel || !sel.rangeCount || sel.isCollapsed){ if(!_fmtPop || !_fmtPop.classList.contains('show')) fmtHideAll(); return; }
   const node = sel.anchorNode;
@@ -4669,12 +4675,119 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!b || !m) return;
   b.onclick = toggleTopMenu;
   // Capture: hide the menu BEFORE the item's own onclick opens its modal.
-  m.addEventListener('click', (e)=>{ if(e.target.closest('.tm-item')) closeTopMenu(); }, true);
+  // The format-toolbar toggle is exempt — it flips in place, so keeping the
+  // menu open lets the user see the state change.
+  m.addEventListener('click', (e)=>{
+    if(e.target.closest('#btnFmtToggle')) return;
+    if(e.target.closest('.tm-item')) closeTopMenu();
+  }, true);
   document.addEventListener('click', (e)=>{
     if(!m.classList.contains('open')) return;
     if(e.target.closest('#topMenu') || e.target.closest('#btnMenu')) return;
     closeTopMenu();
   });
+});
+
+/* ---- Power User: gates advanced features (currently the format toolbar) ----
+   NOT security — the whole app is client-side, so this is feature-gating for a
+   trusted team (same trust model as the rest of the app: the backend itself is
+   open by design). The password never appears in source; only its SHA-256 is
+   embedded, so it can't be read out of the HTML. Login is tab-scoped
+   (sessionStorage, like the editor sign-in); the toolbar flag itself persists
+   per device (localStorage), default OFF. */
+const POWER_USER_HASH = '72bbf3f3b3ecee66f50c422c009c5aef47d03b7ae9d3691d29196f2f773f1c64'; // sha256("user:pass")
+function isPowerUser(){ try{ return sessionStorage.getItem('powerUser') === '1'; }catch(e){ return false; } }
+function fmtToolbarOn(){ try{ return localStorage.getItem('fmtToolbarEnabled') === '1'; }catch(e){ return false; } }
+async function sha256Hex(s){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+
+function refreshPowerMenuUI(){
+  const pu = document.getElementById('btnPowerUser');
+  const ft = document.getElementById('btnFmtToggle');
+  if(!pu || !ft) return;
+  const on = isPowerUser();
+  pu.textContent = on ? '🔑 Power User ✓ (ออกจากระบบ)' : '🔑 Power User';
+  ft.style.display = on ? '' : 'none';
+  ft.textContent = '🛠 Format toolbar: ' + (fmtToolbarOn() ? 'เปิดอยู่ ✅' : 'ปิดอยู่');
+}
+
+function openPowerLogin(){
+  const ov = document.createElement('div');
+  ov.className = 'edit-part-modal open';
+  ov.innerHTML = `<div class="edit-part-dialog">
+    <div class="epm-head"><span>🔑 Power User</span><button type="button" class="epm-x">✕</button></div>
+    <div class="epm-body">
+      <div class="epm-note">ล็อกอินเพื่อเปิด-ปิดฟังก์ชันขั้นสูง (เช่น toolbar จัดข้อความ)</div>
+      <label>Username<input type="text" class="pw-user" autocomplete="username" autocapitalize="none"></label>
+      <label>Password<input type="password" class="pw-pass" autocomplete="current-password"></label>
+      <div class="db-status-line err pw-err" style="display:none;"></div>
+    </div>
+    <div class="epm-actions">
+      <button type="button" class="btn pw-cancel">ยกเลิก</button>
+      <button type="button" class="btn btn-primary pw-login">เข้าสู่ระบบ</button>
+    </div>
+  </div>`;
+  ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
+  ov.querySelector('.pw-cancel').onclick = ()=>userDismissTopModal();
+  ov.addEventListener('click', e=>{ if(e.target===ov) userDismissTopModal(); });
+  document.body.appendChild(ov);
+  modalOpened();
+  const userInp = ov.querySelector('.pw-user'), passInp = ov.querySelector('.pw-pass');
+  const errEl = ov.querySelector('.pw-err');
+  setTimeout(()=>userInp.focus(), 30);
+  const doLogin = async ()=>{
+    const btn = ov.querySelector('.pw-login'); btn.disabled = true;
+    try{
+      if(!(window.crypto && crypto.subtle)) throw new Error('ต้องเปิดผ่าน HTTPS (หรือ localhost) จึงจะล็อกอินได้');
+      const h = await sha256Hex(userInp.value.trim() + ':' + passInp.value);
+      if(h !== POWER_USER_HASH){
+        errEl.textContent = 'Username หรือ Password ไม่ถูกต้อง';
+        errEl.style.display = '';
+        btn.disabled = false; passInp.select();
+        return;
+      }
+      try{ sessionStorage.setItem('powerUser','1'); }catch(e){}
+      refreshPowerMenuUI();
+      flashStatus('เข้าสู่ระบบ Power User แล้ว — เปิด ☰ เพื่อตั้งค่า Format toolbar');
+      userDismissTopModal();
+    }catch(err){
+      errEl.textContent = String(err.message||err);
+      errEl.style.display = '';
+      btn.disabled = false;
+    }
+  };
+  ov.querySelector('.pw-login').onclick = doLogin;
+  passInp.onkeydown = e=>{ if(e.key==='Enter'){ e.preventDefault(); doLogin(); } };
+  userInp.onkeydown = e=>{ if(e.key==='Enter'){ e.preventDefault(); passInp.focus(); } };
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  const pu = document.getElementById('btnPowerUser');
+  const ft = document.getElementById('btnFmtToggle');
+  if(!pu || !ft) return;
+  pu.onclick = ()=>{
+    if(isPowerUser()){
+      if(confirm('ออกจากระบบ Power User?')) {
+        try{ sessionStorage.removeItem('powerUser'); }catch(e){}
+        refreshPowerMenuUI();
+      }
+      return;
+    }
+    openPowerLogin();
+  };
+  ft.onclick = ()=>{
+    if(!isPowerUser()) return;                     // hidden anyway, belt & braces
+    const next = fmtToolbarOn() ? '0' : '1';
+    try{ localStorage.setItem('fmtToolbarEnabled', next); }catch(e){}
+    if(next === '0') fmtHideAll();                 // yank it if currently showing
+    refreshPowerMenuUI();
+    flashStatus(next === '1'
+      ? 'เปิด Format toolbar แล้ว — ลากคลุมข้อความในช่อง Description เพื่อใช้งาน'
+      : 'ปิด Format toolbar แล้ว');
+  };
+  refreshPowerMenuUI();
 });
 
 /* ---------------- Tab-scoped editor session ----------------
