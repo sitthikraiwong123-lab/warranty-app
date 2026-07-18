@@ -4463,18 +4463,20 @@ async function emailCurrentPdf(){
   const body = _emailDraftText || '';
   const file = currentPdfFile();
 
+  let shareErr = null;
   if(file && navigator.canShare && navigator.canShare({ files:[file] })){
     try{ await navigator.share({ files:[file], title: subject, text: body }); commitPdfAction(); return; }
-    catch(err){ if(err && err.name === 'AbortError') return; /* user cancelled */ }
+    catch(err){ if(err && err.name === 'AbortError') return; shareErr = err; /* refused → fall back */ }
   }
-  // Fallback (desktop): download the file + open a pre-filled mail draft to attach it.
+  // Fallback (desktop / share refused): download the file + open a pre-filled mail draft to attach it.
   downloadPdfPreview();
   const note = '\n\n[' + (_pdfPreviewFilename||'PDF') + ' ถูกดาวน์โหลดแล้ว — โปรดแนบไฟล์นี้ก่อนส่ง]';
   const a = document.createElement('a');
   a.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body + note);
   document.body.appendChild(a); a.click(); a.remove();
   commitPdfAction();
-  flashStatus('ดาวน์โหลด PDF แล้ว — แนบไฟล์ลงอีเมลที่เปิดขึ้น');
+  if(shareErr) flashStatus('แชร์เข้าอีเมลไม่ได้ (' + (shareErr.name||'error') + ') — ดาวน์โหลด PDF ให้แล้ว แนบลงเมลที่เปิดขึ้น', 6000);
+  else flashStatus('ดาวน์โหลด PDF แล้ว — แนบไฟล์ลงอีเมลที่เปิดขึ้น');
 }
 
 /* Share to a chat / any other app. Same Web Share plumbing as the email action,
@@ -4483,17 +4485,21 @@ async function emailCurrentPdf(){
 async function sharePdf(){
   if(!_pdfPreviewUrl) return;
   const file = currentPdfFile();
+  let shareErr = null;
   if(file && navigator.canShare && navigator.canShare({ files:[file] })){
     try{ await navigator.share({ files:[file], title: pdfSubject(), text: _emailDraftText || '' }); commitPdfAction(); return; }
     catch(err){
       if(err && err.name === 'AbortError') return;                 // user cancelled — do nothing
+      shareErr = err;
       // Some browsers report canShare(files)=true but then refuse the share
       // (permission / not allowed). Don't dead-end: hand the user the file.
     }
   }
   downloadPdfPreview();
   commitPdfAction();
-  flashStatus('แชร์ผ่านระบบไม่ได้ — ดาวน์โหลด PDF ให้แล้ว ส่งต่อเองได้เลย', 5500);
+  flashStatus(shareErr
+    ? ('แชร์ไม่สำเร็จ (' + (shareErr.name||'error') + ') — ดาวน์โหลด PDF ให้แล้ว ส่งต่อเองได้เลย')
+    : 'แชร์ผ่านระบบไม่ได้ — ดาวน์โหลด PDF ให้แล้ว ส่งต่อเองได้เลย', 6000);
 }
 
 function savePdfToDevice(){
