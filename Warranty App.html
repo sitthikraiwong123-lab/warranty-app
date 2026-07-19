@@ -4479,34 +4479,37 @@ async function emailCurrentPdf(){
 
   let shareErr = null;
   if(isMobileDevice() && file && navigator.canShare && navigator.canShare({ files:[file] })){
-    // Kick off the clipboard write inside the same tap gesture as the share
-    // (not after it — activation is gone once the share sheet returns).
-    const copyPromise = (async ()=>{
-      try{ await navigator.clipboard.writeText(body); return true; }catch(e){ return false; }
-    })();
     try{
+      // navigator.share MUST be the first gesture-consuming call in the tap.
+      // Field-tested failure: a clipboard.writeText fired before it consumed
+      // the transient activation and share() then threw NotAllowedError on
+      // Android — so nothing runs before this line.
       await navigator.share({ files:[file], title: subject });   // deliberately NO text
       commitPdfAction();
-      const copied = await copyPromise;
+      // Clipboard AFTER the share sheet returns. Activation is usually gone by
+      // then, so this often fails on Android — the preview's "คัดลอก" button
+      // next to the email draft is the manual path in that case.
+      let copied = false;
+      try{ await navigator.clipboard.writeText(body); copied = true; }catch(e){}
       flashStatus(copied
         ? 'แนบ PDF ให้แล้ว ✓ คัดลอกข้อความไว้แล้ว — แตะค้างบรรทัดบนสุดของเมล แล้วกด “วาง/Paste”'
-        : 'แนบ PDF ให้แล้ว ✓', 9000);
+        : 'แนบ PDF ให้แล้ว ✓ — คัดลอกข้อความได้จากปุ่ม “คัดลอก” ในหน้า preview แล้ววางบนสุดของเมล', 9000);
       return;
     }catch(err){
       if(err && err.name === 'AbortError') return;   // user cancelled — don't log, don't fall back
-      shareErr = err;                                 // refused → give them the file + a draft
+      shareErr = err;                                 // refused → open a draft instead
     }
   }
-  // Desktop, no file-share support, or share refused: download + mailto draft.
-  downloadPdfPreview();
-  const note = '\n\n[' + (_pdfPreviewFilename||'PDF') + ' ถูกดาวน์โหลดแล้ว — โปรดแนบไฟล์นี้ก่อนส่ง]';
+  // Desktop, no file-share support, or share refused: open a mailto draft.
+  // No forced download here — the ⬇ Save PDF button already covers the file.
+  const note = '\n\n[ยังไม่ได้แนบไฟล์ — กดปุ่ม “Save PDF” เพื่อดาวน์โหลด แล้วแนบก่อนส่ง]';
   const a = document.createElement('a');
   a.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body + note);
   document.body.appendChild(a); a.click(); a.remove();
   commitPdfAction();
   flashStatus(shareErr
-    ? ('แชร์ไม่สำเร็จ (' + (shareErr.name||'error') + ') — ดาวน์โหลด PDF ให้แล้ว แนบลงเมลที่เปิดขึ้น')
-    : 'ดาวน์โหลด PDF แล้ว — แนบไฟล์ลงอีเมลที่เปิดขึ้น', 6000);
+    ? ('แชร์ไม่สำเร็จ (' + (shareErr.name||'error') + ') — เปิดร่างเมลแล้ว · กด “Save PDF” เพื่อได้ไฟล์แนบ')
+    : 'เปิดร่างเมลแล้ว — กด “Save PDF” เพื่อดาวน์โหลดไฟล์แนบ', 6500);
 }
 
 /* Share to a chat / any other app. Same Web Share plumbing as the email action,
