@@ -4520,19 +4520,28 @@ async function sharePdf(){
   const file = currentPdfFile();
   let shareErr = null;
   if(file && navigator.canShare && navigator.canShare({ files:[file] })){
-    try{ await navigator.share({ files:[file], title: pdfSubject(), text: _emailDraftText || '' }); commitPdfAction(); return; }
-    catch(err){
+    try{
+      // Same payload as the email button's share, which is the one the
+      // team's phones accept: files + title ONLY. The old payload also
+      // carried `text` and was refused (NotAllowedError) on those phones,
+      // which sent every tap into the download fallback — the message text
+      // now goes onto the clipboard after the sheet instead.
+      await navigator.share({ files:[file], title: pdfSubject() });
+      commitPdfAction();
+      let copied = false;
+      try{ await navigator.clipboard.writeText(_emailDraftText || ''); copied = true; }catch(e){}
+      flashStatus(copied ? 'แชร์แล้ว ✓ คัดลอกข้อความไว้ให้แล้ว — วางในแชทได้เลย' : 'แชร์แล้ว ✓', 6000);
+      return;
+    }catch(err){
       if(err && err.name === 'AbortError') return;                 // user cancelled — do nothing
       shareErr = err;
-      // Some browsers report canShare(files)=true but then refuse the share
-      // (permission / not allowed). Don't dead-end: hand the user the file.
     }
   }
-  downloadPdfPreview();
-  commitPdfAction();
+  // No forced download — ⬇ Save PDF already covers getting the file. And since
+  // nothing left the app here, there's no ledger write / run-number advance.
   flashStatus(shareErr
-    ? ('แชร์ไม่สำเร็จ (' + (shareErr.name||'error') + ') — ดาวน์โหลด PDF ให้แล้ว ส่งต่อเองได้เลย')
-    : 'แชร์ผ่านระบบไม่ได้ — ดาวน์โหลด PDF ให้แล้ว ส่งต่อเองได้เลย', 6000);
+    ? ('แชร์ไม่สำเร็จ (' + (shareErr.name||'error') + ') — กด “Save PDF” เพื่อดาวน์โหลดแล้วส่งต่อเอง')
+    : 'เบราว์เซอร์นี้แชร์ไฟล์ไม่ได้ — กด “Save PDF” เพื่อดาวน์โหลดแล้วส่งต่อเอง', 6500);
 }
 
 function savePdfToDevice(){
