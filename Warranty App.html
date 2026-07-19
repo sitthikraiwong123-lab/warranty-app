@@ -4454,62 +4454,59 @@ function currentPdfFile(){
   }catch(e){ return null; }
 }
 
-/* ALWAYS mailto: — never navigator.share() for this button.
-   navigator.share() hands our text to whatever mail app is picked as a raw
-   ACTION_SEND string; Outlook (at least on mobile) auto-inserts its own
-   signature into the compose body as soon as it opens, THEN appends our
-   shared text after that — so the message lands below the signature and
-   there is no Web Share parameter to control that order; it's entirely the
-   receiving app's own template logic.
-   mailto: instead opens a real "compose" with our body as the draft's
-   initial content, which mail clients place first and append their
-   signature template below — the normal order for anything a user types by
-   hand. Trade-off: mailto: cannot carry an attachment, so the PDF is
-   downloaded and must be attached manually (same as the old desktop-only
-   fallback, now used for every platform). */
+/* Auto-attach + message-above-signature, reconciled.
+   Only Web Share can attach a file to a mail compose (mailto: and app
+   schemes cannot carry attachments, and the ms-outlook:// deep link didn't
+   even open the app on the team's phones). But sharing TEXT through Web
+   Share is what caused the original complaint: Outlook appends shared text
+   below the signature it has already inserted, and no share parameter
+   controls that.
+   So on mobile the file is shared ALONE — no text, so nothing can land
+   under the signature — and the message is placed on the clipboard instead;
+   one paste at the top of the mail puts it above the signature. The share
+   sheet also solves the app-choice problem: the user picks Outlook there.
+   Desktop keeps download + mailto: (body pre-filled above the signature,
+   attach by hand), since desktop share sheets are unreliable for mail. */
+function isMobileDevice(){
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent)); // iPadOS masquerades as Mac
+}
 async function emailCurrentPdf(){
   if(!_pdfPreviewUrl) return;
   const subject = pdfSubject();
-  const body = (_emailDraftText || '') +
-    '\n\n[' + (_pdfPreviewFilename||'PDF') + ' ถูกดาวน์โหลดแล้ว — โปรดแนบไฟล์นี้ก่อนส่ง]';
-  downloadPdfPreview();
-  commitPdfAction();
-  openEmailCompose(subject, body);
-}
+  const body = _emailDraftText || '';
+  const file = currentPdfFile();
 
-/* Opens a mail COMPOSE with our text as the draft body (so the client's own
-   signature lands BELOW it — see the mailto rationale above).
-   The team's mail app is Outlook, but on a phone mailto: goes to the SYSTEM
-   default mail app — often Gmail — not Outlook. Outlook mobile registers its
-   own ms-outlook:// scheme, so on mobile we deep-link the Outlook app
-   directly and only fall back to mailto: (default app) when the scheme goes
-   unhandled — detected by the page still being visible after the attempt,
-   since a handled scheme backgrounds the browser. On desktop mailto: already
-   opens Outlook desktop (the OS default here), so it's used directly. */
-function openEmailCompose(subject, body){
-  const q = 'subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
-  const mailtoHref = 'mailto:?' + q;
-  const fire = href => { const a=document.createElement('a'); a.href=href; document.body.appendChild(a); a.click(); a.remove(); };
-  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-    || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent)); // iPadOS masquerades as Mac
-  if(!isMobile){
-    fire(mailtoHref);
-    flashStatus('ดาวน์โหลด PDF แล้ว — แนบไฟล์ลงอีเมลที่เปิดขึ้น');
-    return;
-  }
-  let appOpened = false;
-  const onHide = ()=>{ if(document.visibilityState === 'hidden') appOpened = true; };
-  document.addEventListener('visibilitychange', onHide);
-  try{ window.location.href = 'ms-outlook://compose?' + q; }catch(e){}
-  setTimeout(()=>{
-    document.removeEventListener('visibilitychange', onHide);
-    if(appOpened){
-      flashStatus('เปิด Outlook แล้ว — แนบไฟล์ PDF ที่ดาวน์โหลดไว้ก่อนส่ง', 6000);
-    } else {
-      fire(mailtoHref);
-      flashStatus('ไม่พบแอป Outlook — เปิดแอปอีเมลเริ่มต้นแทน · แนบไฟล์ PDF ก่อนส่ง', 6000);
+  let shareErr = null;
+  if(isMobileDevice() && file && navigator.canShare && navigator.canShare({ files:[file] })){
+    // Kick off the clipboard write inside the same tap gesture as the share
+    // (not after it — activation is gone once the share sheet returns).
+    const copyPromise = (async ()=>{
+      try{ await navigator.clipboard.writeText(body); return true; }catch(e){ return false; }
+    })();
+    try{
+      await navigator.share({ files:[file], title: subject });   // deliberately NO text
+      commitPdfAction();
+      const copied = await copyPromise;
+      flashStatus(copied
+        ? 'แนบ PDF ให้แล้ว ✓ คัดลอกข้อความไว้แล้ว — แตะค้างบรรทัดบนสุดของเมล แล้วกด “วาง/Paste”'
+        : 'แนบ PDF ให้แล้ว ✓', 9000);
+      return;
+    }catch(err){
+      if(err && err.name === 'AbortError') return;   // user cancelled — don't log, don't fall back
+      shareErr = err;                                 // refused → give them the file + a draft
     }
-  }, 1800);
+  }
+  // Desktop, no file-share support, or share refused: download + mailto draft.
+  downloadPdfPreview();
+  const note = '\n\n[' + (_pdfPreviewFilename||'PDF') + ' ถูกดาวน์โหลดแล้ว — โปรดแนบไฟล์นี้ก่อนส่ง]';
+  const a = document.createElement('a');
+  a.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body + note);
+  document.body.appendChild(a); a.click(); a.remove();
+  commitPdfAction();
+  flashStatus(shareErr
+    ? ('แชร์ไม่สำเร็จ (' + (shareErr.name||'error') + ') — ดาวน์โหลด PDF ให้แล้ว แนบลงเมลที่เปิดขึ้น')
+    : 'ดาวน์โหลด PDF แล้ว — แนบไฟล์ลงอีเมลที่เปิดขึ้น', 6000);
 }
 
 /* Share to a chat / any other app. Same Web Share plumbing as the email action,
