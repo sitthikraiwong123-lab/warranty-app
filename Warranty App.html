@@ -4454,29 +4454,30 @@ function currentPdfFile(){
   }catch(e){ return null; }
 }
 
-/* Adaptive email: on phones (and modern desktops) share the actual PDF file so
-   Outlook attaches it automatically; otherwise download the PDF and open a
-   pre-filled Outlook/mail draft for the user to attach it. */
+/* ALWAYS mailto: — never navigator.share() for this button.
+   navigator.share() hands our text to whatever mail app is picked as a raw
+   ACTION_SEND string; Outlook (at least on mobile) auto-inserts its own
+   signature into the compose body as soon as it opens, THEN appends our
+   shared text after that — so the message lands below the signature and
+   there is no Web Share parameter to control that order; it's entirely the
+   receiving app's own template logic.
+   mailto: instead opens a real "compose" with our body as the draft's
+   initial content, which mail clients place first and append their
+   signature template below — the normal order for anything a user types by
+   hand. Trade-off: mailto: cannot carry an attachment, so the PDF is
+   downloaded and must be attached manually (same as the old desktop-only
+   fallback, now used for every platform). */
 async function emailCurrentPdf(){
   if(!_pdfPreviewUrl) return;
   const subject = pdfSubject();
   const body = _emailDraftText || '';
-  const file = currentPdfFile();
-
-  let shareErr = null;
-  if(file && navigator.canShare && navigator.canShare({ files:[file] })){
-    try{ await navigator.share({ files:[file], title: subject, text: body }); commitPdfAction(); return; }
-    catch(err){ if(err && err.name === 'AbortError') return; shareErr = err; /* refused → fall back */ }
-  }
-  // Fallback (desktop / share refused): download the file + open a pre-filled mail draft to attach it.
   downloadPdfPreview();
   const note = '\n\n[' + (_pdfPreviewFilename||'PDF') + ' ถูกดาวน์โหลดแล้ว — โปรดแนบไฟล์นี้ก่อนส่ง]';
   const a = document.createElement('a');
   a.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body + note);
   document.body.appendChild(a); a.click(); a.remove();
   commitPdfAction();
-  if(shareErr) flashStatus('แชร์เข้าอีเมลไม่ได้ (' + (shareErr.name||'error') + ') — ดาวน์โหลด PDF ให้แล้ว แนบลงเมลที่เปิดขึ้น', 6000);
-  else flashStatus('ดาวน์โหลด PDF แล้ว — แนบไฟล์ลงอีเมลที่เปิดขึ้น');
+  flashStatus('ดาวน์โหลด PDF แล้ว — แนบไฟล์ลงอีเมลที่เปิดขึ้น');
 }
 
 /* Share to a chat / any other app. Same Web Share plumbing as the email action,
