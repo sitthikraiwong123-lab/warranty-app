@@ -310,19 +310,46 @@ input,select,textarea{font-family:inherit;font-size:14px;}
    that pushState and unbalance _modalDepth. It dismisses via Esc / tap-outside
    / picking an item instead. */
 .btn-menu{font-size:16px;line-height:1;}
-.top-menu{position:absolute;top:100%;right:14px;margin-top:6px;z-index:60;
-  background:#fff;border:1px solid var(--border);border-radius:10px;
-  box-shadow:0 6px 20px rgba(0,0,0,.16);min-width:186px;padding:6px;
-  display:none;flex-direction:column;gap:2px;}
+.top-menu{position:absolute;top:100%;right:14px;margin-top:8px;z-index:60;
+  background:#fff;border:1px solid var(--border);border-radius:13px;
+  box-shadow:0 12px 32px rgba(0,0,0,.17);min-width:236px;padding:7px;
+  display:none;flex-direction:column;gap:1px;}
 .top-menu.open{display:flex;}
-.tm-item{display:flex;align-items:center;gap:9px;width:100%;justify-content:flex-start;
-  text-align:left;background:none;border:none;border-radius:7px;padding:12px;
+/* section caption — groups the menu into คำสั่ง / ฐานข้อมูล / ตั้งค่า / ผู้ดูแลระบบ */
+.tm-label{font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
+  color:#9a9a9e;padding:9px 12px 5px;user-select:none;}
+.tm-item{display:flex;align-items:center;gap:10px;width:100%;justify-content:flex-start;
+  text-align:left;background:none;border:none;border-radius:8px;padding:10px 12px;
   font-size:13.5px;font-weight:600;color:var(--dark);cursor:pointer;
   -webkit-tap-highlight-color:transparent;}
 .tm-item:hover{background:#f3f3f4;}
 .tm-item:active{background:#e9e9ea;}
 .tm-item:disabled{opacity:.45;cursor:not-allowed;}
-.tm-sep{height:1px;background:var(--border);margin:4px 8px;} /* groups: order / database / settings */
+.tm-ic{flex:none;width:19px;text-align:center;font-size:14px;line-height:1;}
+.tm-txt{flex:1;min-width:0;}
+.tm-val{flex:none;font-size:11.5px;font-weight:700;color:var(--gray);}
+.tm-chev{flex:none;font-size:17px;line-height:1;color:#b6b6ba;}
+/* pill switch — replaces the old "เปิดอยู่ ✅" text so state reads at a glance */
+.tm-sw{flex:none;width:33px;height:19px;border-radius:10px;background:#d2d2d6;
+  position:relative;transition:background .16s;}
+.tm-sw::after{content:'';position:absolute;top:2px;left:2px;width:15px;height:15px;
+  border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.28);transition:transform .16s;}
+.tm-sw.on{background:var(--green);}
+.tm-sw.on::after{transform:translateX(14px);}
+.tm-sep{height:1px;background:var(--border);margin:5px 8px;}
+/* settings sub-page rows (Power Automate) — reuses the .edit-part-dialog shell */
+.sp-row{display:flex;align-items:center;gap:11px;padding:11px 12px;
+  border:1px solid var(--border);border-radius:10px;background:#fff;width:100%;
+  text-align:left;font:inherit;color:var(--dark);cursor:pointer;}
+.sp-row:disabled{opacity:.5;cursor:not-allowed;}
+.sp-row .sp-txt{flex:1;min-width:0;}
+.sp-row .sp-txt b{display:block;font-size:13px;font-weight:700;}
+.sp-row .sp-txt span{display:block;font-size:11px;color:var(--gray);margin-top:2px;line-height:1.4;}
+.sp-status{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;
+  padding:10px 12px;border-radius:10px;line-height:1.4;}
+.sp-status.on{background:#eaf7ef;color:var(--green);}
+.sp-status.off{background:#f5f5f6;color:var(--gray);}
+.sp-status.warn{background:#fff7ed;color:var(--amber);}
 /* add-row: clear full-width dashed accent action */
 .btn-add-row{width:100%;justify-content:center;border:1.5px dashed var(--red);color:var(--red);
   background:#fff;padding:11px 14px;border-radius:10px;font-weight:700;margin-top:4px;}
@@ -713,21 +740,26 @@ table.pphoto tr td:last-child{ border-right:none !important; }
     <button class="btn btn-menu" id="btnMenu" aria-label="เมนู" aria-haspopup="true" aria-expanded="false" aria-controls="topMenu">☰</button>
     <div class="top-menu" id="topMenu" role="menu" aria-labelledby="btnMenu">
       <!-- ใบสั่ง -->
-      <button class="tm-item" id="btnNew" role="menuitem">＋ ใหม่</button>
-      <button class="tm-item" id="btnHistory" role="menuitem">📝 Draft</button>
+      <div class="tm-label">คำสั่ง</div>
+      <button class="tm-item" id="btnNew" role="menuitem"><span class="tm-ic">＋</span><span class="tm-txt">ใหม่</span></button>
+      <button class="tm-item" id="btnHistory" role="menuitem"><span class="tm-ic">📝</span><span class="tm-txt">Draft</span></button>
       <div class="tm-sep" role="separator"></div>
+      <div class="tm-label">ฐานข้อมูล</div>
       <!-- ฐานข้อมูล -->
-      <button class="tm-item" id="btnViewDb" role="menuitem" title="ดูข้อมูล Database ที่ซิงค์มา">📋 Data Base</button>
-      <button class="tm-item" id="lookupSyncRefresh" role="menuitem" title="ซิงค์ฐานข้อมูล Machine/Part">⟳ ซิงค์</button>
+      <button class="tm-item" id="btnViewDb" role="menuitem" title="ดูข้อมูล Database ที่ซิงค์มา"><span class="tm-ic">📋</span><span class="tm-txt">Data Base</span></button>
+      <button class="tm-item" id="lookupSyncRefresh" role="menuitem" title="ซิงค์ฐานข้อมูล Machine/Part"><span class="tm-ic">⟳</span><span class="tm-txt">ซิงค์</span></button>
       <div class="tm-sep" role="separator"></div>
       <!-- ตั้งค่า -->
-      <button class="tm-item" id="btnLang" role="menuitem" title="สลับภาษา UI — บิล PDF เป็นภาษาอังกฤษเสมอ">🌐 ภาษา: TH</button>
-      <button class="tm-item" id="btnRunNumEdit" role="menuitem" style="display:none;" title="แก้เลขที่เอกสาร — ใช้ได้เมื่อ Running number เปิดอยู่">✏️ แก้เลขที่เอกสาร</button>
-      <button class="tm-item" id="btnPowerUser" role="menuitem" title="ล็อกอินเพื่อเปิด-ปิดฟังก์ชันขั้นสูง">🔑 Power User</button>
-      <button class="tm-item" id="btnFmtToggle" role="menuitem" style="display:none;" title="เปิด-ปิด toolbar จัดข้อความ (B/I/U/สี) ในช่อง Description">🛠 Format toolbar: ปิด</button>
-      <button class="tm-item" id="btnEmailRecipients" role="menuitem" style="display:none;" title="เพิ่ม/ลบอีเมลผู้รับที่บันทึกไว้ — ใช้เลือกตอนส่งอีเมล">👥 จัดการอีเมลผู้รับ</button>
-      <button class="tm-item" id="btnPaSendToggle" role="menuitem" style="display:none;" title="ส่งอีเมล+แนบไฟล์ผ่าน Power Automate โดยตรง — ต้องมี license และ flow ต้องไม่ถูกระงับ">⚡ Power Automate ส่งตรง: ปิด</button>
-      <button class="tm-item" id="btnRunNumToggle" role="menuitem" style="display:none;" title="เปิด-ปิดการรันเลขที่เอกสาร (TL{ปี}-{เลข}) — ตั้งค่าเป็นกลาง มีผลกับทุกคน">🔢 Running number: ปิด</button>
+      <div class="tm-label">ตั้งค่า</div>
+      <button class="tm-item" id="btnLang" role="menuitem" title="สลับภาษา UI — บิล PDF เป็นภาษาอังกฤษเสมอ"><span class="tm-ic">🌐</span><span class="tm-txt" id="btnLangTxt">ภาษา</span><span class="tm-val" id="btnLangVal">TH</span></button>
+      <button class="tm-item" id="btnRunNumEdit" role="menuitem" style="display:none;" title="แก้เลขที่เอกสาร — ใช้ได้เมื่อ Running number เปิดอยู่"><span class="tm-ic">✏️</span><span class="tm-txt">แก้เลขที่เอกสาร</span></button>
+      <button class="tm-item" id="btnPowerUser" role="menuitem" title="ล็อกอินเพื่อเปิด-ปิดฟังก์ชันขั้นสูง"><span class="tm-ic">🔑</span><span class="tm-txt" id="btnPowerUserTxt">Power User</span><span class="tm-val" id="btnPowerUserVal"></span></button>
+      <!-- ผู้ดูแลระบบ (โผล่เมื่อล็อกอิน Power User) -->
+      <div class="tm-sep tm-admin" role="separator" style="display:none;"></div>
+      <div class="tm-label tm-admin" style="display:none;">ผู้ดูแลระบบ</div>
+      <button class="tm-item tm-admin" id="btnFmtToggle" role="menuitem" style="display:none;" title="เปิด-ปิด toolbar จัดข้อความ (B/I/U/สี) ในช่อง Description"><span class="tm-ic">🛠</span><span class="tm-txt">Format toolbar</span><span class="tm-sw" id="swFmt"></span></button>
+      <button class="tm-item tm-admin" id="btnRunNumToggle" role="menuitem" style="display:none;" title="เปิด-ปิดการรันเลขที่เอกสาร (TL{ปี}-{เลข}) — ตั้งค่าเป็นกลาง มีผลกับทุกคน"><span class="tm-ic">🔢</span><span class="tm-txt">Running number</span><span class="tm-sw" id="swRun"></span></button>
+      <button class="tm-item tm-admin" id="btnPowerAutomate" role="menuitem" style="display:none;" title="ตั้งค่า Power Automate — เปิด-ปิดส่งตรง, ลิงก์ Flow, อีเมลผู้รับ"><span class="tm-ic">⚡</span><span class="tm-txt">Power Automate</span><span class="tm-val" id="paMenuVal">ปิด</span><span class="tm-chev">›</span></button>
     </div>
   </div>
 </div>
@@ -1492,10 +1524,14 @@ let lookupOnline = navigator.onLine;
    flips a flag once and every device picks it up on next load — no per-device
    drift. Cached in lkv for instant/offline start; refreshed on load and after
    each sync. See getAppSettings/setAppSettings/reserveExportNumber in Code.gs. */
-const DEFAULT_APP_SETTINGS = { fmtToolbar:false, runNumberEnabled:false, paSend:false, runPrefix:'TL', runYear:(new Date()).getFullYear(), runNext:1 };
+const DEFAULT_APP_SETTINGS = { fmtToolbar:false, runNumberEnabled:false, paSend:false, paUrl:'', hideSendEmail:false, runPrefix:'TL', runYear:(new Date()).getFullYear(), runNext:1 };
 let appSettings = Object.assign({}, DEFAULT_APP_SETTINGS);
 function fmtToolbarOn(){ return !!appSettings.fmtToolbar; }
 function paSendOn(){ return !!appSettings.paSend; }
+function hideSendEmailOn(){ return !!appSettings.hideSendEmail; }
+/* Flow URL is editable in-app (⚡ settings page) and shared via appSettings;
+   the built-in constant is only the fallback when nothing has been saved. */
+function paSendUrl(){ return String(appSettings.paUrl || '').trim() || POWER_AUTOMATE_SEND_URL; }
 function runNumberEnabled(){ return !!appSettings.runNumberEnabled; }
 function pad3(n){ return ('000' + (parseInt(n,10)||1)).slice(-3); }
 function runNumberPreview(){
@@ -1511,6 +1547,11 @@ function applyAppSettings(){
   try{ refreshPowerMenuUI(); }catch(e){}
   try{ renderRunNumber(); }catch(e){}
   try{ if(!fmtToolbarOn()) fmtHideAll(); }catch(e){}
+  // ✉ Send to email can be hidden app-wide from the ⚡ settings page
+  try{
+    const se = document.getElementById('pmSendEmail');
+    if(se) se.style.display = hideSendEmailOn() ? 'none' : '';
+  }catch(e){}
 }
 async function loadAppSettings(){
   try{ const cached = await lkvGet('appSettings'); if(cached) appSettings = Object.assign({}, DEFAULT_APP_SETTINGS, cached); }catch(e){}
@@ -4545,10 +4586,14 @@ function blobToBase64(blob){
    the real email with the PDF attached via the flow; OFF = upload+mailto. */
 const POWER_AUTOMATE_SEND_URL = 'https://defaultb19434a9ca324427917c5491d81bf4.fe.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/29/workflows/f7b9d69aa3d74e9db9ee75dff6984b91/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=7ISbg1YkZvWNbYQ9SyBMVT26UiQ7GZqBWEaRV5xqAA4';
 
-/* Returns 'ok' | 'suspended' | 'error: ...' — never sends an email. */
-async function probePowerAutomateFlow(){
+/* Returns 'ok' | 'suspended' | 'error: ...' — never sends an email.
+   url defaults to the saved/built-in flow URL; the ⚡ settings page passes a
+   candidate URL so it can be tested BEFORE being saved. */
+async function probePowerAutomateFlow(url){
+  const target = String(url || '').trim() || paSendUrl();
+  if(!/^https:\/\//i.test(target)) return 'error: ลิงก์ต้องขึ้นต้นด้วย https://';
   try{
-    const res = await fetch(POWER_AUTOMATE_SEND_URL, {
+    const res = await fetch(target, {
       method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
     });
     if(res.ok) return 'ok';   // 202: run started; empty body → email step fails, nothing sent
@@ -4575,33 +4620,25 @@ function openSendReviewModal(){
   // To logic isn't ready). This modal focuses on three things only — subject,
   // body, and the PDF — with To BLANK for the user to fill in Outlook.
   //
-  // Three delivery paths:
-  //   paMode      — ⚡ Power Automate flow sends the mail (PDF really attached)
-  //                 IMMEDIATELY; needs a To, so recipients come from the
-  //                 directory (Power-User + licensed only).
-  //   shareMode   — the DEFAULT on devices with file sharing: the native OS
-  //                 share sheet carries the REAL PDF as an attachment; the user
-  //                 taps Outlook and a new Outlook draft opens with the file
-  //                 already attached. This is the only web way to get a real
-  //                 attachment into an Outlook draft. The share payload is
-  //                 files-only (the team's phones refuse text+files), so the
-  //                 subject+body are copied to the clipboard to paste in.
-  //   else        — desktop without file sharing: upload the PDF to Drive and
-  //                 open outlook.office.com compose with subject + body + the
-  //                 file LINK (a compose deep link can't carry an attachment).
+  // Two delivery paths:
+  //   paMode — ⚡ Power Automate flow sends the mail (PDF really attached)
+  //            IMMEDIATELY; needs a To, so recipients come from the directory
+  //            (Power-User + licensed only).
+  //   else   — OUTLOOK, always: upload the PDF to Drive, then open
+  //            outlook.office.com compose with subject + body + the file link.
+  //            On phones that link opens the Outlook APP itself (app-link
+  //            association), which is the behaviour the team confirmed working.
+  //            The upload is best-effort: if it fails, Outlook STILL opens with
+  //            the message and a note to attach the PDF by hand — a broken
+  //            upload must never block the draft.
+  //            (A compose deep link cannot carry a real attachment; 📤 Share is
+  //            the path for a true attached file.)
   const paMode = paSendOn();
-  // File-share capability decided up front (drives the label + note + branch).
-  const shareMode = !paMode && (()=>{
-    try{ const f = currentPdfFile(true); return !!(f && navigator.canShare && navigator.canShare({ files:[f] })); }
-    catch(e){ return false; }
-  })();
   const ov = document.createElement('div');
   ov.className = 'edit-part-modal open';
   const note = paMode
     ? '⚡ ระบบจะส่งอีเมลออกทันทีพร้อมไฟล์แนบเมื่อกด “ส่งอีเมล” — ผู้รับดึงจากสมุดรายชื่อ'
-    : shareMode
-      ? 'กดปุ่มแล้วเลือก Outlook ในหน้าต่างแชร์ — Outlook จะเปิด draft ใหม่พร้อมไฟล์ PDF แนบมาให้ ช่อง “ถึง” เว้นว่าง (หัวข้อ+เนื้อหาถูกคัดลอกไว้ให้วาง)'
-      : 'ระบบจะอัพโหลดไฟล์ PDF แล้วเปิด Outlook พร้อมหัวข้อ+เนื้อหา+ลิงก์ไฟล์ — ช่อง “ถึง” เว้นว่างให้กรอกเองใน Outlook';
+    : 'กดปุ่มเดียว → เปิด Outlook พร้อมหัวข้อ + เนื้อหา + ลิงก์ไฟล์ PDF · ช่อง “ถึง” เว้นว่างให้กรอกเองใน Outlook';
   ov.innerHTML = `<div class="edit-part-dialog">
     <div class="epm-head"><span>ตรวจทานก่อนส่งอีเมล</span><button type="button" class="epm-x">✕</button></div>
     <div class="epm-body">
@@ -4613,7 +4650,7 @@ function openSendReviewModal(){
     </div>
     <div class="epm-actions">
       <button type="button" class="btn srm-cancel">ยกเลิก</button>
-      <button type="button" class="btn btn-primary srm-send">${paMode?'ส่งอีเมล':(shareMode?'🟦 แชร์เข้า Outlook':'🟦 ส่งเข้า Outlook')}</button>
+      <button type="button" class="btn btn-primary srm-send">${paMode?'ส่งอีเมล':'🟦 ส่งเข้า Outlook'}</button>
     </div>
   </div>`;
   ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
@@ -4623,26 +4660,27 @@ function openSendReviewModal(){
   modalOpened();
 
   const btn = ov.querySelector('.srm-send');
-  const idleLabel = paMode ? 'ส่งอีเมล' : (shareMode ? '🟦 แชร์เข้า Outlook' : '🟦 ส่งเข้า Outlook');
+  const idleLabel = paMode ? 'ส่งอีเมล' : '🟦 ส่งเข้า Outlook';
   // Recipients feed ONLY the PA path (which can't send with a blank To).
   const toList = ()=> _emailRecipientsCache.filter(r => r.Type !== 'cc');
   const ccList = ()=> _emailRecipientsCache.filter(r => r.Type === 'cc');
   const joinEmails = rows => rows.map(r => r.Email).join(';');
   if(paMode) loadEmailRecipients();   // warm the cache for the PA send
 
-  // Deep-link fallback (desktop). To omitted → Outlook opens with To blank.
+  // Outlook compose deep link. To omitted → Outlook opens with To blank.
+  // The file line adapts to whether the upload produced a link.
   let uploadedUrl = '';
-  const outlookComposeUrl = (subject, body)=>
-    'https://outlook.office.com/mail/deeplink/compose?subject=' + encodeURIComponent(subject) +
-    '&body=' + encodeURIComponent(body);
   const openOutlook = (win, subject, body)=>{
-    const url = outlookComposeUrl(subject, body + '\n\n📎 ไฟล์ PDF: ' + uploadedUrl);
+    const fileLine = uploadedUrl
+      ? '\n\n📎 ไฟล์ PDF: ' + uploadedUrl
+      : '\n\n[แนบไฟล์ PDF ก่อนส่ง — กด ⬇ Save PDF ในแอปเพื่อดาวน์โหลดไฟล์]';
+    const url = 'https://outlook.office.com/mail/deeplink/compose?subject=' + encodeURIComponent(subject) +
+      '&body=' + encodeURIComponent(body + fileLine);
     if(win && !win.closed){ win.location.href = url; return; }
     const a = document.createElement('a');
     a.href = url; a.target = '_blank'; a.rel = 'noopener';
     document.body.appendChild(a); a.click(); a.remove();
   };
-  const copyText = async t => { try{ await navigator.clipboard.writeText(t); return true; }catch(e){ return false; } };
 
   ov.querySelector('.srm-send').onclick = async ()=>{
     const subject = ov.querySelector('.srm-subject').value.trim();
@@ -4653,30 +4691,6 @@ function openSendReviewModal(){
     if(!_pdfBlob){ showErr('ไม่พบไฟล์ PDF — กลับไปกด 📄 เพื่อสร้างใหม่'); return; }
     if(paMode && !toList().length){ showErr('โหมด ⚡ ต้องมีผู้รับ (To) — เพิ่มที่ ☰ → 👥 จัดการอีเมลผู้รับ'); return; }
 
-    // ---- shareMode: native share sheet, REAL attachment into an Outlook draft.
-    // navigator.share must be the first gesture-consuming call, so nothing may
-    // await before shareFileViaSheet(). Subject is the share title; subject+body
-    // ride the clipboard because the payload is files-only.
-    if(shareMode){
-      btn.disabled = true; btn.textContent = 'กำลังเปิด...';
-      const res = await shareFileViaSheet(subject || pdfSubject());
-      if(res.ok){
-        commitPdfAction();
-        const copied = await copyText(subject + '\n\n' + body);
-        flashStatus(copied
-          ? 'เปิดหน้าต่างแชร์แล้ว — แตะ Outlook แล้ววางหัวข้อ/เนื้อหา (คัดลอกไว้ให้แล้ว) ไฟล์แนบมาให้'
-          : 'เปิดหน้าต่างแชร์แล้ว — แตะ Outlook (ไฟล์แนบมาให้); หัวข้อ/เนื้อหาอยู่ในหน้าพรีวิว กด “คัดลอก”', 8000);
-        userDismissTopModal();
-        return;
-      }
-      btn.disabled = false; btn.textContent = idleLabel;
-      if(res.stage === 'cancelled') return;                       // user backed out — quiet
-      if(res.stage === 'busy'){ showErr('การแชร์ครั้งก่อนยังค้างอยู่ — รอสักครู่แล้วลองใหม่'); return; }
-      showErr('แชร์ไม่สำเร็จ (' + (res.stage === 'refused' ? (res.err && res.err.name || 'refused') : res.stage) + ') — หรือกด ⬇ Save PDF แล้วแนบเอง');
-      return;
-    }
-
-    // ---- desktop fallback: Outlook compose deep link + Drive link.
     // Fallback second tap: upload already done but the window was popup-blocked.
     if(uploadedUrl){
       openOutlook(null, subject, body);
@@ -4691,7 +4705,7 @@ function openSendReviewModal(){
     try{
       if(paMode){
         const fileContentBase64 = await blobToBase64(_pdfBlob);
-        const res = await fetch(POWER_AUTOMATE_SEND_URL, {
+        const res = await fetch(paSendUrl(), {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ to: joinEmails(toList()), cc: joinEmails(ccList()), subject, body,
             fileName: _pdfPreviewFilename||'export_order.pdf', fileContentBase64 })
@@ -4706,23 +4720,36 @@ function openSendReviewModal(){
         userDismissTopModal();
         return;
       }
-      const base64 = await blobToBase64(_pdfBlob);
-      const r = await lookupApiCall('uploadPdf', { base64, filename: _pdfPreviewFilename || 'export_order.pdf' });
-      uploadedUrl = r.url;
-      if(r.shared === false) flashStatus('อัพโหลดแล้ว แต่เปิดลิงก์สาธารณะไม่ได้ — ผู้รับอาจต้องขอสิทธิ์เข้าถึงไฟล์', 7000);
+      // Upload is BEST-EFFORT: a failure (offline, backend hiccup) must never
+      // stop the Outlook draft from opening — we just swap the file link for a
+      // "attach it yourself" note.
+      let uploadErr = '';
+      try{
+        const base64 = await blobToBase64(_pdfBlob);
+        const r = await lookupApiCall('uploadPdf', { base64, filename: _pdfPreviewFilename || 'export_order.pdf' });
+        uploadedUrl = r.url || '';
+        if(r.shared === false) flashStatus('อัพโหลดแล้ว แต่เปิดลิงก์สาธารณะไม่ได้ — ผู้รับอาจต้องขอสิทธิ์เข้าถึงไฟล์', 7000);
+      }catch(upErr){
+        uploadedUrl = '';
+        uploadErr = (upErr && upErr.message) ? upErr.message : String(upErr);
+      }
       if(win && !win.closed){
         openOutlook(win, subject, body);
         commitPdfAction();
-        flashStatus('เปิด Outlook แล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่งใน Outlook', 7000);
+        flashStatus(uploadedUrl
+          ? 'เปิด Outlook แล้ว ✓ (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่ง'
+          : 'เปิด Outlook แล้ว — แต่อัพโหลดไฟล์ไม่สำเร็จ (' + uploadErr + ') · กด ⬇ Save PDF แล้วแนบเอง', 8000);
         userDismissTopModal();
       }else{
         btn.disabled = false; btn.textContent = '🟦 เปิด Outlook ส่งเมล';
-        flashStatus('ไฟล์พร้อมแล้ว ✓ — กดปุ่มอีกครั้งเพื่อเปิด Outlook', 5000);
+        flashStatus(uploadedUrl
+          ? 'ไฟล์พร้อมแล้ว ✓ — กดปุ่มอีกครั้งเพื่อเปิด Outlook'
+          : 'อัพโหลดไม่สำเร็จ — กดปุ่มอีกครั้งเพื่อเปิด Outlook แล้วแนบไฟล์เอง', 6000);
       }
     }catch(err){
       if(win && !win.closed) win.close();
       btn.disabled = false; btn.textContent = idleLabel;
-      showErr((paMode?'ส่งไม่สำเร็จ: ':'อัพโหลดไม่สำเร็จ: ') + (err && err.message ? err.message : err) + ' — หรือกด ⬇ Save PDF แล้วแนบเอง');
+      showErr((paMode?'ส่งไม่สำเร็จ: ':'เปิด Outlook ไม่สำเร็จ: ') + (err && err.message ? err.message : err) + ' — หรือกด ⬇ Save PDF แล้วแนบเอง');
     }
   };
 }
@@ -5085,8 +5112,9 @@ const _i18nObserver = new MutationObserver(muts=>{
   }
 });
 function updateLangBtn(){
-  const b = document.getElementById('btnLang');
-  if(b) b.textContent = uiLang === 'en' ? '🌐 Language: EN' : '🌐 ภาษา: TH';
+  const t = document.getElementById('btnLangTxt'), v = document.getElementById('btnLangVal');
+  if(t) t.textContent = uiLang === 'en' ? 'Language' : 'ภาษา';
+  if(v) v.textContent = uiLang === 'en' ? 'EN' : 'TH';
 }
 function setUiLang(l){
   uiLang = (l === 'en') ? 'en' : 'th';
@@ -5160,24 +5188,17 @@ async function sha256Hex(s){
 
 function refreshPowerMenuUI(){
   const pu = document.getElementById('btnPowerUser');
-  const ft = document.getElementById('btnFmtToggle');
-  const rn = document.getElementById('btnRunNumToggle');
-  if(!pu || !ft) return;
+  if(!pu) return;
   const on = isPowerUser();
-  pu.textContent = on ? '🔑 Power User ✓ (ออกจากระบบ)' : '🔑 Power User';
-  ft.style.display = on ? '' : 'none';
-  ft.textContent = '🛠 Format toolbar: ' + (fmtToolbarOn() ? 'เปิดอยู่ ✅' : 'ปิดอยู่');
-  if(rn){
-    rn.style.display = on ? '' : 'none';
-    rn.textContent = '🔢 Running number: ' + (runNumberEnabled() ? 'เปิดอยู่ ✅' : 'ปิดอยู่');
-  }
-  const er = document.getElementById('btnEmailRecipients');
-  if(er) er.style.display = on ? '' : 'none';
-  const pa = document.getElementById('btnPaSendToggle');
-  if(pa){
-    pa.style.display = on ? '' : 'none';
-    pa.textContent = '⚡ Power Automate ส่งตรง: ' + (paSendOn() ? 'เปิดอยู่ ✅' : 'ปิดอยู่');
-  }
+  const setTxt = (id, t)=>{ const e = document.getElementById(id); if(e) e.textContent = t; };
+  const setSw  = (id, v)=>{ const e = document.getElementById(id); if(e) e.classList.toggle('on', !!v); };
+  setTxt('btnPowerUserTxt', 'Power User');
+  setTxt('btnPowerUserVal', on ? 'ออกจากระบบ' : '');
+  // the whole admin section (separator + caption + items) rides on one class
+  document.querySelectorAll('.tm-admin').forEach(el=>{ el.style.display = on ? '' : 'none'; });
+  setSw('swFmt', fmtToolbarOn());
+  setSw('swRun', runNumberEnabled());
+  setTxt('paMenuVal', paSendOn() ? 'เปิด' : 'ปิด');
   try{ renderRunNumber(); }catch(e){}   // keeps the chip + the ✏️ edit menu item in sync
 }
 
@@ -5263,37 +5284,130 @@ document.addEventListener('DOMContentLoaded', ()=>{
       ? 'เปิด Running number แล้ว (มีผลกับทุกคน) — เลขจะรันอัตโนมัติทุกครั้งที่ Export'
       : 'ปิด Running number แล้ว (มีผลกับทุกคน)');
   };
-  const pa = document.getElementById('btnPaSendToggle');
-  if(pa) pa.onclick = async ()=>{
-    if(!isPowerUser()) return;
-    if(paSendOn()){
-      await saveAppSettings({ paSend: false });
-      flashStatus('ปิด Power Automate ส่งตรงแล้ว (มีผลกับทุกคน) — กลับไปใช้อัพโหลด+ลิงก์ในร่างเมล');
-      return;
-    }
-    // Activating: probe the flow first (empty body — no email can go out).
-    pa.disabled = true; pa.textContent = '⚡ กำลังทดสอบ flow...';
-    const st = await probePowerAutomateFlow();
-    pa.disabled = false;
-    if(st === 'suspended'){
-      refreshPowerMenuUI();
-      flashStatus('Flow ยังถูกระงับ (Suspended) — ต้องมี Power Automate Premium license ก่อน จึงจะเปิดใช้ได้', 8000);
-      return;
-    }
-    if(st !== 'ok'){
-      refreshPowerMenuUI();
-      flashStatus('ทดสอบ flow ไม่ผ่าน (' + st + ') — ยังไม่เปิดใช้', 8000);
-      return;
-    }
-    await saveAppSettings({ paSend: true });   // global — applies to everyone
-    flashStatus('เปิด Power Automate ส่งตรงแล้ว ✅ (มีผลกับทุกคน) — ✉ Send to email จะส่งจริงพร้อมแนบไฟล์', 8000);
-  };
+  // ⚡ opens its own settings page (activate, flow URL, recipients, hide-send).
+  const pa = document.getElementById('btnPowerAutomate');
+  if(pa) pa.onclick = ()=>{ if(isPowerUser()) openPowerAutomateModal(); };
   // btnRunNumEdit's click handler is wired in renderRunNumber (it depends on the
   // current order — edit this Draft's number vs the shared next number).
-  const er = document.getElementById('btnEmailRecipients');
-  if(er) er.onclick = ()=>{ if(isPowerUser()) openEmailRecipientsModal(); };
   refreshPowerMenuUI();
 });
+
+/* ---------- ⚡ Power Automate settings page (Power-User only) ----------
+   One place for everything the flow needs, so nothing has to be edited in the
+   source file: activate/deactivate (probing the flow first — an empty body can
+   never send a mail), the flow's HTTP trigger URL, the recipient directory, and
+   whether ✉ Send to email is shown at all. Every setting is shared server-side
+   via appSettings, so an admin's change applies to everyone. */
+function openPowerAutomateModal(){
+  const ov = document.createElement('div');
+  ov.className = 'edit-part-modal open';
+  ov.innerHTML = `<div class="edit-part-dialog">
+    <div class="epm-head"><span>⚡ Power Automate</span><button type="button" class="epm-x">✕</button></div>
+    <div class="epm-body">
+      <div class="pa-status sp-status off">กำลังตรวจสอบ...</div>
+      <button type="button" class="sp-row pa-toggle">
+        <span class="tm-ic">📤</span>
+        <span class="sp-txt"><b>ส่งอีเมลตรงผ่าน Flow</b><span>ส่งจริงพร้อมแนบไฟล์ PDF อัตโนมัติ — ไม่ต้องเปิดแอปอีเมล</span></span>
+        <span class="tm-sw pa-sw"></span>
+      </button>
+      <label>ลิงก์ Flow (HTTP trigger URL)
+        <input type="url" class="pa-url" placeholder="https://...powerplatform.com/.../invoke?..." autocomplete="off" spellcheck="false">
+      </label>
+      <div class="epm-actions" style="padding:0;border:none;gap:8px;">
+        <button type="button" class="btn pa-test">ทดสอบลิงก์</button>
+        <button type="button" class="btn btn-primary pa-save">บันทึกลิงก์</button>
+      </div>
+      <div class="db-status-line err pa-err" style="display:none;"></div>
+      <div class="tm-sep" style="margin:2px 0;"></div>
+      <button type="button" class="sp-row pa-recipients">
+        <span class="tm-ic">👥</span>
+        <span class="sp-txt"><b>จัดการอีเมลผู้รับ</b><span>รายชื่อ To/CC ที่ใช้ตอนส่งตรงผ่าน Flow</span></span>
+        <span class="tm-chev">›</span>
+      </button>
+      <button type="button" class="sp-row pa-hidesend">
+        <span class="tm-ic">✉</span>
+        <span class="sp-txt"><b>ซ่อนปุ่ม Send to email</b><span>ซ่อนปุ่ม ✉ ในเมนู 📄 (ใช้เฉพาะ ⬇ Save PDF / 📤 Share)</span></span>
+        <span class="tm-sw pa-hs-sw"></span>
+      </button>
+    </div>
+    <div class="epm-actions"><button type="button" class="btn pa-close">ปิด</button></div>
+  </div>`;
+  ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
+  ov.querySelector('.pa-close').onclick = ()=>userDismissTopModal();
+  ov.addEventListener('click', e=>{ if(e.target===ov) userDismissTopModal(); });
+  document.body.appendChild(ov);
+  modalOpened();
+
+  const statusEl = ov.querySelector('.pa-status');
+  const errEl = ov.querySelector('.pa-err');
+  const urlInp = ov.querySelector('.pa-url');
+  const showErr = m => { errEl.textContent = m; errEl.style.display = m ? '' : 'none'; };
+  const setStatus = (cls, txt)=>{ statusEl.className = 'pa-status sp-status ' + cls; statusEl.textContent = txt; };
+  const render = ()=>{
+    ov.querySelector('.pa-sw').classList.toggle('on', paSendOn());
+    ov.querySelector('.pa-hs-sw').classList.toggle('on', hideSendEmailOn());
+    if(paSendOn())            setStatus('on',   '● เปิดใช้งานอยู่ — ✉ Send to email จะส่งจริงพร้อมไฟล์แนบ');
+    else if(appSettings.paUrl) setStatus('off', '○ ปิดอยู่ — บันทึกลิงก์ไว้แล้ว กดสวิตช์เพื่อเปิดใช้งาน');
+    else                       setStatus('warn','▲ ยังไม่ได้ตั้งค่าลิงก์ Flow — วางลิงก์แล้วกดบันทึก');
+  };
+  urlInp.value = String(appSettings.paUrl || '');
+  render();
+
+  // Activate/deactivate — activating probes the flow first (empty body: no
+  // recipient, so no mail can go out) and refuses while it is Suspended.
+  ov.querySelector('.pa-toggle').onclick = async ()=>{
+    showErr('');
+    if(paSendOn()){
+      await saveAppSettings({ paSend:false });
+      render();
+      flashStatus('ปิด Power Automate ส่งตรงแล้ว (มีผลกับทุกคน)', 5000);
+      return;
+    }
+    const candidate = urlInp.value.trim() || appSettings.paUrl;
+    if(!candidate){ showErr('ยังไม่มีลิงก์ Flow — วางลิงก์แล้วกดบันทึกก่อน'); return; }
+    setStatus('warn', '… กำลังทดสอบ flow');
+    const st = await probePowerAutomateFlow(candidate);
+    if(st === 'suspended'){ render(); showErr('Flow ถูกระงับ (Suspended) — ต้องมี Power Automate Premium license ก่อนจึงจะเปิดใช้ได้'); return; }
+    if(st !== 'ok'){ render(); showErr('ทดสอบ flow ไม่ผ่าน (' + st + ') — ยังไม่เปิดใช้'); return; }
+    const patch = { paSend:true };
+    if(urlInp.value.trim()) patch.paUrl = urlInp.value.trim();
+    await saveAppSettings(patch);
+    render();
+    flashStatus('เปิด Power Automate ส่งตรงแล้ว ✅ (มีผลกับทุกคน)', 7000);
+  };
+
+  ov.querySelector('.pa-test').onclick = async ()=>{
+    showErr('');
+    const candidate = urlInp.value.trim() || appSettings.paUrl;
+    if(!candidate){ showErr('ใส่ลิงก์ Flow ก่อน'); return; }
+    const b = ov.querySelector('.pa-test'); b.disabled = true; b.textContent = 'กำลังทดสอบ...';
+    const st = await probePowerAutomateFlow(candidate);
+    b.disabled = false; b.textContent = 'ทดสอบลิงก์';
+    if(st === 'ok')             setStatus('on',   '● ลิงก์ใช้ได้ — flow พร้อมทำงาน');
+    else if(st === 'suspended'){ setStatus('warn','▲ flow ถูกระงับ (Suspended)'); showErr('ต้องมี Power Automate Premium license ก่อน flow จึงจะทำงาน'); }
+    else                        { setStatus('warn','▲ ทดสอบไม่ผ่าน'); showErr(st); }
+  };
+
+  ov.querySelector('.pa-save').onclick = async ()=>{
+    showErr('');
+    const u = urlInp.value.trim();
+    if(u && !/^https:\/\//i.test(u)){ showErr('ลิงก์ต้องขึ้นต้นด้วย https://'); return; }
+    const b = ov.querySelector('.pa-save'); b.disabled = true; b.textContent = 'กำลังบันทึก...';
+    await saveAppSettings({ paUrl: u });
+    b.disabled = false; b.textContent = 'บันทึกลิงก์';
+    render();
+    flashStatus(u ? 'บันทึกลิงก์ Flow แล้ว (มีผลกับทุกคน)' : 'ล้างลิงก์ Flow แล้ว — กลับไปใช้ลิงก์เริ่มต้นในโค้ด', 5000);
+  };
+
+  ov.querySelector('.pa-recipients').onclick = ()=>openEmailRecipientsModal();
+
+  ov.querySelector('.pa-hidesend').onclick = async ()=>{
+    const next = !hideSendEmailOn();
+    await saveAppSettings({ hideSendEmail: next });
+    render();
+    flashStatus(next ? 'ซ่อนปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)' : 'แสดงปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)', 5000);
+  };
+}
 
 /* ---------- 👥 Saved email recipients (To/Cc autocomplete for the send-review
    modal). Read is open to everyone; add/delete is Power-User gated in the UI
