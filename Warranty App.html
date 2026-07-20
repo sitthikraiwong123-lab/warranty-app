@@ -4530,8 +4530,7 @@ async function copyMessageQuiet(){
    browser_fallback_url taking over when Outlook isn't installed. iOS does
    accept the raw scheme, with a visibility check falling back to mailto:.
    Desktop keeps mailto: (Outlook desktop is the OS default there). */
-async function emailCurrentPdf(){
-  if(!_pdfPreviewUrl) return;
+function openOutlookDeepLinkFallback(){
   const subject = pdfSubject();
   const note = '\n\n[ไฟล์ PDF: กด “Save PDF” ในแอปฟอร์ม แล้วแนบจากเครื่องก่อนส่ง]';
   const q = 'subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent((_emailDraftText || '') + note);
@@ -4561,6 +4560,93 @@ async function emailCurrentPdf(){
     if(opened) flashStatus('เปิด Outlook แล้ว — แนบไฟล์ด้วย “Save PDF”', 8000);
     else { fire(mailtoHref); flashStatus('ไม่พบแอป Outlook — เปิดแอปเมลเริ่มต้นแทน · แนบไฟล์ด้วย “Save PDF”', 6500); }
   }, 1800);
+}
+
+/* ---------- ✉ Send to email — auto-attach via Power Automate + Outlook ----------
+   A deep link (openOutlookDeepLinkFallback above) can never carry an
+   attachment — only a real backend can. This POSTs {to, cc, subject, body,
+   fileName, fileContentBase64} to a Power Automate flow whose "Send an
+   email (V2)" (Outlook connector) action actually sends the mail with the
+   PDF attached — no share sheet, no app hand-off, no manual attach step.
+   Trade-off (deliberate, confirmed with the user): the Outlook connector's
+   standard action SENDS immediately — there is no "create draft" action to
+   review inside Outlook — so this app supplies its own review step
+   (openSendReviewModal) with an explicit confirm before the real send call.
+   Until POWER_AUTOMATE_SEND_URL is configured, falls back to the Outlook
+   app deep link (no auto-attach) so the button never dead-ends mid-setup. */
+const POWER_AUTOMATE_SEND_URL = 'PASTE_YOUR_POWER_AUTOMATE_HTTP_URL_HERE';
+
+function blobToBase64(blob){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=> resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function emailCurrentPdf(){
+  if(!_pdfPreviewUrl) return;
+  if(POWER_AUTOMATE_SEND_URL.indexOf('PASTE_YOUR') === 0){
+    flashStatus('ยังไม่ได้ตั้งค่าระบบส่งอีเมลอัตโนมัติ — เปิดแอป Outlook แทน (ไม่แนบไฟล์อัตโนมัติ)', 6000);
+    openOutlookDeepLinkFallback();
+    return;
+  }
+  openSendReviewModal();
+}
+
+function openSendReviewModal(){
+  const ov = document.createElement('div');
+  ov.className = 'edit-part-modal open';
+  ov.innerHTML = `<div class="edit-part-dialog">
+    <div class="epm-head"><span>ตรวจทานก่อนส่งอีเมล</span><button type="button" class="epm-x">✕</button></div>
+    <div class="epm-body">
+      <div class="epm-note">ระบบจะส่งอีเมลออกทันทีเมื่อกด “ส่งอีเมล” ด้านล่าง — ตรวจข้อมูลให้ครบก่อน</div>
+      <label>ถึง (To) *<input type="email" class="srm-to" placeholder="name@company.com" autocomplete="off"></label>
+      <label>สำเนาถึง (CC)<input type="text" class="srm-cc" placeholder="คั่นหลายอีเมลด้วย , (เว้นว่างได้)" autocomplete="off"></label>
+      <label>หัวข้อ<input type="text" class="srm-subject" value="${escAttr(pdfSubject())}"></label>
+      <label>เนื้อหา<textarea class="srm-body" rows="7">${escAttr(_emailDraftText||'')}</textarea></label>
+      <div class="epm-note">แนบไฟล์: ${escHtml(_pdfPreviewFilename||'export_order.pdf')}</div>
+      <div class="db-status-line err srm-err" style="display:none;"></div>
+    </div>
+    <div class="epm-actions">
+      <button type="button" class="btn srm-cancel">ยกเลิก</button>
+      <button type="button" class="btn btn-primary srm-send">ส่งอีเมล</button>
+    </div>
+  </div>`;
+  ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
+  ov.querySelector('.srm-cancel').onclick = ()=>userDismissTopModal();
+  ov.addEventListener('click', e=>{ if(e.target===ov) userDismissTopModal(); });
+  document.body.appendChild(ov);
+  modalOpened();
+  const toInp = ov.querySelector('.srm-to');
+  setTimeout(()=>toInp.focus(), 30);
+
+  ov.querySelector('.srm-send').onclick = async ()=>{
+    const to = toInp.value.trim();
+    const cc = ov.querySelector('.srm-cc').value.trim();
+    const subject = ov.querySelector('.srm-subject').value.trim();
+    const body = ov.querySelector('.srm-body').value;
+    const errEl = ov.querySelector('.srm-err');
+    const showErr = m => { errEl.textContent = m; errEl.style.display=''; };
+    if(!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)){ showErr('กรุณาใส่อีเมลผู้รับให้ถูกต้อง'); toInp.focus(); return; }
+    if(!_pdfBlob){ showErr('ไม่พบไฟล์ PDF — กลับไปกด 📄 เพื่อสร้างใหม่'); return; }
+    const btn = ov.querySelector('.srm-send'); btn.disabled = true; btn.textContent = 'กำลังส่ง...';
+    try{
+      const fileContentBase64 = await blobToBase64(_pdfBlob);
+      const res = await fetch(POWER_AUTOMATE_SEND_URL, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ to, cc, subject, body, fileName: _pdfPreviewFilename||'export_order.pdf', fileContentBase64 })
+      });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      commitPdfAction();
+      flashStatus('ส่งอีเมลแล้ว ✓ (แนบ PDF อัตโนมัติ)', 6000);
+      userDismissTopModal();
+    }catch(err){
+      btn.disabled = false; btn.textContent = 'ส่งอีเมล';
+      showErr('ส่งไม่สำเร็จ: ' + (err && err.message ? err.message : err));
+    }
+  };
 }
 
 /* ---------- 📤 Share (any app) ---------- */
