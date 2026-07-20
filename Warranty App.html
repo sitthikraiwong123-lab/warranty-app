@@ -4573,25 +4573,39 @@ function openSendReviewModal(){
   // The To field is intentionally left to the user: recipient management lives
   // in ☰ → 👥 จัดการอีเมลผู้รับ and does NOT feed the send flow (its per-order
   // To logic isn't ready). This modal focuses on three things only — subject,
-  // body, and the PDF — and hands them to Outlook with To BLANK for the user
-  // to fill. Two modes, chosen by the shared ⚡ flag:
-  //   paMode — Power Automate flow sends the mail (PDF really attached)
-  //            IMMEDIATELY on confirm; it still needs a To, so in this mode
-  //            (Power-User + licensed only) recipients come from the directory.
-  //   else   — upload the PDF to Drive, then open OUTLOOK compose
-  //            (outlook.office.com deeplink) with subject + body + the file
-  //            LINK in the body, To left blank. A compose deep link cannot
-  //            carry a real attachment — only PA / the Graph API can — so the
-  //            file rides as a link here.
+  // body, and the PDF — with To BLANK for the user to fill in Outlook.
+  //
+  // Three delivery paths:
+  //   paMode      — ⚡ Power Automate flow sends the mail (PDF really attached)
+  //                 IMMEDIATELY; needs a To, so recipients come from the
+  //                 directory (Power-User + licensed only).
+  //   shareMode   — the DEFAULT on devices with file sharing: the native OS
+  //                 share sheet carries the REAL PDF as an attachment; the user
+  //                 taps Outlook and a new Outlook draft opens with the file
+  //                 already attached. This is the only web way to get a real
+  //                 attachment into an Outlook draft. The share payload is
+  //                 files-only (the team's phones refuse text+files), so the
+  //                 subject+body are copied to the clipboard to paste in.
+  //   else        — desktop without file sharing: upload the PDF to Drive and
+  //                 open outlook.office.com compose with subject + body + the
+  //                 file LINK (a compose deep link can't carry an attachment).
   const paMode = paSendOn();
+  // File-share capability decided up front (drives the label + note + branch).
+  const shareMode = !paMode && (()=>{
+    try{ const f = currentPdfFile(true); return !!(f && navigator.canShare && navigator.canShare({ files:[f] })); }
+    catch(e){ return false; }
+  })();
   const ov = document.createElement('div');
   ov.className = 'edit-part-modal open';
+  const note = paMode
+    ? '⚡ ระบบจะส่งอีเมลออกทันทีพร้อมไฟล์แนบเมื่อกด “ส่งอีเมล” — ผู้รับดึงจากสมุดรายชื่อ'
+    : shareMode
+      ? 'กดปุ่มแล้วเลือก Outlook ในหน้าต่างแชร์ — Outlook จะเปิด draft ใหม่พร้อมไฟล์ PDF แนบมาให้ ช่อง “ถึง” เว้นว่าง (หัวข้อ+เนื้อหาถูกคัดลอกไว้ให้วาง)'
+      : 'ระบบจะอัพโหลดไฟล์ PDF แล้วเปิด Outlook พร้อมหัวข้อ+เนื้อหา+ลิงก์ไฟล์ — ช่อง “ถึง” เว้นว่างให้กรอกเองใน Outlook';
   ov.innerHTML = `<div class="edit-part-dialog">
     <div class="epm-head"><span>ตรวจทานก่อนส่งอีเมล</span><button type="button" class="epm-x">✕</button></div>
     <div class="epm-body">
-      <div class="epm-note">${paMode
-        ? '⚡ ระบบจะส่งอีเมลออกทันทีพร้อมไฟล์แนบเมื่อกด “ส่งอีเมล” — ผู้รับดึงจากสมุดรายชื่อ'
-        : 'ระบบจะอัพโหลดไฟล์ PDF แล้วเปิด Outlook พร้อมหัวข้อ+เนื้อหา+ลิงก์ไฟล์ — ช่อง “ถึง (To)” เว้นว่างให้กรอกเองใน Outlook'}</div>
+      <div class="epm-note">${note}</div>
       <label>หัวข้อ<input type="text" class="srm-subject" value="${escAttr(pdfSubject())}"></label>
       <label>เนื้อหา<textarea class="srm-body" rows="7">${escAttr(_emailDraftText||'')}</textarea></label>
       <div class="epm-note">แนบไฟล์: ${escHtml(_pdfPreviewFilename||'export_order.pdf')}</div>
@@ -4599,7 +4613,7 @@ function openSendReviewModal(){
     </div>
     <div class="epm-actions">
       <button type="button" class="btn srm-cancel">ยกเลิก</button>
-      <button type="button" class="btn btn-primary srm-send">${paMode?'ส่งอีเมล':'🟦 ส่งเข้า Outlook'}</button>
+      <button type="button" class="btn btn-primary srm-send">${paMode?'ส่งอีเมล':(shareMode?'🟦 แชร์เข้า Outlook':'🟦 ส่งเข้า Outlook')}</button>
     </div>
   </div>`;
   ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
@@ -4609,34 +4623,27 @@ function openSendReviewModal(){
   modalOpened();
 
   const btn = ov.querySelector('.srm-send');
-  // Recipients feed ONLY the PA path (which can't send with a blank To). The
-  // Outlook-deeplink path deliberately ignores them and leaves To blank.
+  const idleLabel = paMode ? 'ส่งอีเมล' : (shareMode ? '🟦 แชร์เข้า Outlook' : '🟦 ส่งเข้า Outlook');
+  // Recipients feed ONLY the PA path (which can't send with a blank To).
   const toList = ()=> _emailRecipientsCache.filter(r => r.Type !== 'cc');
   const ccList = ()=> _emailRecipientsCache.filter(r => r.Type === 'cc');
   const joinEmails = rows => rows.map(r => r.Email).join(';');
   if(paMode) loadEmailRecipients();   // warm the cache for the PA send
 
-  // Non-PA: ONE tap opens Outlook. The catch is that the PDF must be uploaded
-  // first (async) to get a link, and an await eats the click gesture so a
-  // window opened afterwards is popup-blocked. Fix: reserve the Outlook window
-  // SYNCHRONOUSLY at the top of the handler (about:blank, still inside the
-  // gesture), upload, then redirect that same window to the compose URL. If the
-  // browser blocks even that reserve (win===null), we keep the uploaded link
-  // and fall back to a second tap — so the worst case degrades, never dead-ends.
+  // Deep-link fallback (desktop). To omitted → Outlook opens with To blank.
   let uploadedUrl = '';
-  // To is intentionally omitted → Outlook opens with the recipient field blank.
-  const outlookComposeUrl = (subject, body)=>{
-    const q = ['subject=' + encodeURIComponent(subject), 'body=' + encodeURIComponent(body)];
-    return 'https://outlook.office.com/mail/deeplink/compose?' + q.join('&');
-  };
+  const outlookComposeUrl = (subject, body)=>
+    'https://outlook.office.com/mail/deeplink/compose?subject=' + encodeURIComponent(subject) +
+    '&body=' + encodeURIComponent(body);
   const openOutlook = (win, subject, body)=>{
     const url = outlookComposeUrl(subject, body + '\n\n📎 ไฟล์ PDF: ' + uploadedUrl);
-    if(win && !win.closed){ win.location.href = url; return true; }
+    if(win && !win.closed){ win.location.href = url; return; }
     const a = document.createElement('a');
     a.href = url; a.target = '_blank'; a.rel = 'noopener';
     document.body.appendChild(a); a.click(); a.remove();
-    return true;
   };
+  const copyText = async t => { try{ await navigator.clipboard.writeText(t); return true; }catch(e){ return false; } };
+
   ov.querySelector('.srm-send').onclick = async ()=>{
     const subject = ov.querySelector('.srm-subject').value.trim();
     const body = ov.querySelector('.srm-body').value;
@@ -4646,16 +4653,38 @@ function openSendReviewModal(){
     if(!_pdfBlob){ showErr('ไม่พบไฟล์ PDF — กลับไปกด 📄 เพื่อสร้างใหม่'); return; }
     if(paMode && !toList().length){ showErr('โหมด ⚡ ต้องมีผู้รับ (To) — เพิ่มที่ ☰ → 👥 จัดการอีเมลผู้รับ'); return; }
 
-    // Fallback second tap: upload already done last time but the window was
-    // popup-blocked — this fresh gesture opens Outlook straight away.
-    if(!paMode && uploadedUrl){
+    // ---- shareMode: native share sheet, REAL attachment into an Outlook draft.
+    // navigator.share must be the first gesture-consuming call, so nothing may
+    // await before shareFileViaSheet(). Subject is the share title; subject+body
+    // ride the clipboard because the payload is files-only.
+    if(shareMode){
+      btn.disabled = true; btn.textContent = 'กำลังเปิด...';
+      const res = await shareFileViaSheet(subject || pdfSubject());
+      if(res.ok){
+        commitPdfAction();
+        const copied = await copyText(subject + '\n\n' + body);
+        flashStatus(copied
+          ? 'เปิดหน้าต่างแชร์แล้ว — แตะ Outlook แล้ววางหัวข้อ/เนื้อหา (คัดลอกไว้ให้แล้ว) ไฟล์แนบมาให้'
+          : 'เปิดหน้าต่างแชร์แล้ว — แตะ Outlook (ไฟล์แนบมาให้); หัวข้อ/เนื้อหาอยู่ในหน้าพรีวิว กด “คัดลอก”', 8000);
+        userDismissTopModal();
+        return;
+      }
+      btn.disabled = false; btn.textContent = idleLabel;
+      if(res.stage === 'cancelled') return;                       // user backed out — quiet
+      if(res.stage === 'busy'){ showErr('การแชร์ครั้งก่อนยังค้างอยู่ — รอสักครู่แล้วลองใหม่'); return; }
+      showErr('แชร์ไม่สำเร็จ (' + (res.stage === 'refused' ? (res.err && res.err.name || 'refused') : res.stage) + ') — หรือกด ⬇ Save PDF แล้วแนบเอง');
+      return;
+    }
+
+    // ---- desktop fallback: Outlook compose deep link + Drive link.
+    // Fallback second tap: upload already done but the window was popup-blocked.
+    if(uploadedUrl){
       openOutlook(null, subject, body);
       commitPdfAction();
       flashStatus('เปิด Outlook แล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่งใน Outlook', 7000);
       userDismissTopModal();
       return;
     }
-
     // Reserve the Outlook window NOW, before any await, so it isn't blocked.
     const win = paMode ? null : window.open('about:blank', '_blank');
     btn.disabled = true; btn.textContent = paMode ? 'กำลังส่ง...' : 'กำลังเปิด Outlook...';
@@ -4687,13 +4716,12 @@ function openSendReviewModal(){
         flashStatus('เปิด Outlook แล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่งใน Outlook', 7000);
         userDismissTopModal();
       }else{
-        // Reserve was blocked — keep the link, let a second tap open Outlook.
         btn.disabled = false; btn.textContent = '🟦 เปิด Outlook ส่งเมล';
         flashStatus('ไฟล์พร้อมแล้ว ✓ — กดปุ่มอีกครั้งเพื่อเปิด Outlook', 5000);
       }
     }catch(err){
       if(win && !win.closed) win.close();
-      btn.disabled = false; btn.textContent = paMode ? 'ส่งอีเมล' : 'ส่งเข้า Outlook';
+      btn.disabled = false; btn.textContent = idleLabel;
       showErr((paMode?'ส่งไม่สำเร็จ: ':'อัพโหลดไม่สำเร็จ: ') + (err && err.message ? err.message : err) + ' — หรือกด ⬇ Save PDF แล้วแนบเอง');
     }
   };
