@@ -91,6 +91,9 @@ function handleRequest(e) {
       case 'addPendingPart':     result = addPendingPart(params); break;
       case 'getPendingParts':    result = getPendingParts(params); break;
       case 'deletePendingPart':  result = deletePendingPart(params); break;
+      case 'getEmailRecipients':   result = getEmailRecipients(params); break;
+      case 'addEmailRecipient':    result = addEmailRecipient(params); break;
+      case 'deleteEmailRecipient': result = deleteEmailRecipient(params); break;
       case 'getAppSettings':     result = getAppSettings(); break;
       case 'setAppSettings':     result = setAppSettings(params); break;
       case 'reserveExportNumber':result = reserveExportNumber(params); break;
@@ -1341,6 +1344,83 @@ function deletePendingPart(params) {
     const ids = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
     for (var i = ids.length - 1; i >= 0; i--) {
       if (String(ids[i][0]).trim() === id) { sh.deleteRow(i + 2); return { success: true, action: 'deleted' }; }
+    }
+    return { success: true, action: 'not_found' };
+  } finally { try { lock.releaseLock(); } catch (e) {} }
+}
+
+// ============================================================
+// EMAIL RECIPIENTS — saved To/Cc addresses for the Power Automate send flow
+// A small shared directory so the team doesn't retype the same addresses on
+// every order. Read is open to anyone (the send-review modal offers them as
+// autocomplete); add/delete is UI-gated to Power User in the frontend, same
+// trust model as the other global settings in this app.
+// ============================================================
+const EMAILRECIPIENTS_SHEET = 'EmailRecipients';
+const EMAILRECIPIENTS_HEADERS = ['Email', 'Name', 'AddedBy', 'AddedAt'];
+
+function getEmailRecipientsSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(EMAILRECIPIENTS_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(EMAILRECIPIENTS_SHEET);
+    sh.appendRow(EMAILRECIPIENTS_HEADERS);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function getEmailRecipients(params) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(EMAILRECIPIENTS_SHEET);
+  if (!sh || sh.getLastRow() < 2) return { success: true, rows: [] };
+  const values = sh.getRange(2, 1, sh.getLastRow() - 1, EMAILRECIPIENTS_HEADERS.length).getValues();
+  const rows = [];
+  values.forEach(function (v) {
+    if (!String(v[0]).trim()) return;
+    rows.push({ Email: String(v[0]), Name: String(v[1] || ''), AddedBy: String(v[2] || ''),
+      AddedAt: v[3] instanceof Date ? v[3].toISOString() : v[3] });
+  });
+  rows.sort(function (a, b) { return a.Name.localeCompare(b.Name) || a.Email.localeCompare(b.Email); });
+  return { success: true, rows: rows };
+}
+
+// Upserts by email (case-insensitive) so re-adding just updates the name.
+function addEmailRecipient(params) {
+  const email = String((params && params.email) || '').trim();
+  if (!email || email.indexOf('@') === -1) throw new Error('valid email required');
+  const name = String((params && params.name) || '').trim();
+  const addedBy = String((params && params.addedBy) || '').trim();
+
+  const sh = getEmailRecipientsSheet_();
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    const last = sh.getLastRow();
+    let rowNum = -1;
+    if (last > 1) {
+      const emails = sh.getRange(2, 1, last - 1, 1).getValues();
+      for (var i = 0; i < emails.length; i++) {
+        if (String(emails[i][0]).trim().toLowerCase() === email.toLowerCase()) { rowNum = i + 2; break; }
+      }
+    }
+    const row = [email, name, addedBy, new Date()];
+    if (rowNum === -1) sh.appendRow(row);
+    else sh.getRange(rowNum, 1, 1, EMAILRECIPIENTS_HEADERS.length).setValues([row]);
+    return { success: true, action: rowNum === -1 ? 'added' : 'updated' };
+  } finally { try { lock.releaseLock(); } catch (e) {} }
+}
+
+function deleteEmailRecipient(params) {
+  const email = String((params && params.email) || '').trim().toLowerCase();
+  if (!email) throw new Error('email required');
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(EMAILRECIPIENTS_SHEET);
+  if (!sh || sh.getLastRow() < 2) return { success: true, action: 'noop' };
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    const emails = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+    for (var i = emails.length - 1; i >= 0; i--) {
+      if (String(emails[i][0]).trim().toLowerCase() === email) { sh.deleteRow(i + 2); return { success: true, action: 'deleted' }; }
     }
     return { success: true, action: 'not_found' };
   } finally { try { lock.releaseLock(); } catch (e) {} }

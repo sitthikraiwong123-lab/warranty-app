@@ -725,6 +725,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
       <button class="tm-item" id="btnRunNumEdit" role="menuitem" style="display:none;" title="แก้เลขที่เอกสาร — ใช้ได้เมื่อ Running number เปิดอยู่">✏️ แก้เลขที่เอกสาร</button>
       <button class="tm-item" id="btnPowerUser" role="menuitem" title="ล็อกอินเพื่อเปิด-ปิดฟังก์ชันขั้นสูง">🔑 Power User</button>
       <button class="tm-item" id="btnFmtToggle" role="menuitem" style="display:none;" title="เปิด-ปิด toolbar จัดข้อความ (B/I/U/สี) ในช่อง Description">🛠 Format toolbar: ปิด</button>
+      <button class="tm-item" id="btnEmailRecipients" role="menuitem" style="display:none;" title="เพิ่ม/ลบอีเมลผู้รับที่บันทึกไว้ — ใช้เลือกตอนส่งอีเมล">👥 จัดการอีเมลผู้รับ</button>
       <button class="tm-item" id="btnRunNumToggle" role="menuitem" style="display:none;" title="เปิด-ปิดการรันเลขที่เอกสาร (TL{ปี}-{เลข}) — ตั้งค่าเป็นกลาง มีผลกับทุกคน">🔢 Running number: ปิด</button>
     </div>
   </div>
@@ -4602,8 +4603,9 @@ function openSendReviewModal(){
     <div class="epm-head"><span>ตรวจทานก่อนส่งอีเมล</span><button type="button" class="epm-x">✕</button></div>
     <div class="epm-body">
       <div class="epm-note">ระบบจะส่งอีเมลออกทันทีเมื่อกด “ส่งอีเมล” ด้านล่าง — ตรวจข้อมูลให้ครบก่อน</div>
-      <label>ถึง (To) *<input type="email" class="srm-to" placeholder="name@company.com" autocomplete="off"></label>
-      <label>สำเนาถึง (CC)<input type="text" class="srm-cc" placeholder="คั่นหลายอีเมลด้วย , (เว้นว่างได้)" autocomplete="off"></label>
+      <label>ถึง (To) *<input type="email" class="srm-to" list="srmRecipientsList" placeholder="name@company.com" autocomplete="off"></label>
+      <label>สำเนาถึง (CC)<input type="text" class="srm-cc" list="srmRecipientsList" placeholder="คั่นหลายอีเมลด้วย , (เว้นว่างได้)" autocomplete="off"></label>
+      <datalist id="srmRecipientsList"></datalist>
       <label>หัวข้อ<input type="text" class="srm-subject" value="${escAttr(pdfSubject())}"></label>
       <label>เนื้อหา<textarea class="srm-body" rows="7">${escAttr(_emailDraftText||'')}</textarea></label>
       <div class="epm-note">แนบไฟล์: ${escHtml(_pdfPreviewFilename||'export_order.pdf')}</div>
@@ -4621,6 +4623,13 @@ function openSendReviewModal(){
   modalOpened();
   const toInp = ov.querySelector('.srm-to');
   setTimeout(()=>toInp.focus(), 30);
+
+  const fillRecipientsList = rows => {
+    const dl = ov.querySelector('#srmRecipientsList');
+    if(dl) dl.innerHTML = rows.map(r => `<option value="${escAttr(r.Email)}">${escAttr(r.Name||r.Email)}</option>`).join('');
+  };
+  fillRecipientsList(_emailRecipientsCache);           // whatever's cached, immediately
+  loadEmailRecipients().then(fillRecipientsList);       // then refresh from the server
 
   ov.querySelector('.srm-send').onclick = async ()=>{
     const to = toInp.value.trim();
@@ -5093,6 +5102,8 @@ function refreshPowerMenuUI(){
     rn.style.display = on ? '' : 'none';
     rn.textContent = '🔢 Running number: ' + (runNumberEnabled() ? 'เปิดอยู่ ✅' : 'ปิดอยู่');
   }
+  const er = document.getElementById('btnEmailRecipients');
+  if(er) er.style.display = on ? '' : 'none';
   try{ renderRunNumber(); }catch(e){}   // keeps the chip + the ✏️ edit menu item in sync
 }
 
@@ -5180,8 +5191,83 @@ document.addEventListener('DOMContentLoaded', ()=>{
   };
   // btnRunNumEdit's click handler is wired in renderRunNumber (it depends on the
   // current order — edit this Draft's number vs the shared next number).
+  const er = document.getElementById('btnEmailRecipients');
+  if(er) er.onclick = ()=>{ if(isPowerUser()) openEmailRecipientsModal(); };
   refreshPowerMenuUI();
 });
+
+/* ---------- 👥 Saved email recipients (To/Cc autocomplete for the send-review
+   modal). Read is open to everyone; add/delete is Power-User gated in the UI
+   (the menu item itself is hidden unless logged in). ---------- */
+let _emailRecipientsCache = [];
+async function loadEmailRecipients(){
+  try{
+    const res = await lookupApiCall('getEmailRecipients', {});
+    _emailRecipientsCache = (res && res.rows) || [];
+  }catch(e){ /* offline / not deployed yet — keep whatever we last had */ }
+  return _emailRecipientsCache;
+}
+
+function openEmailRecipientsModal(){
+  const ov = document.createElement('div');
+  ov.className = 'edit-part-modal open';
+  const render = ()=>{
+    const rows = _emailRecipientsCache;
+    const list = rows.length
+      ? rows.map(r => `<div class="epm-restore-card" style="display:flex;align-items:center;gap:8px;">
+          <div style="flex:1;min-width:0;"><b>${escHtml(r.Name||'(ไม่มีชื่อ)')}</b><br><span style="color:var(--gray);font-size:12px;">${escHtml(r.Email)}</span></div>
+          <button type="button" class="btn er-del" data-email="${escAttr(r.Email)}" style="padding:6px 10px;font-size:12px;color:var(--red);border-color:var(--red);">ลบ</button>
+        </div>`).join('')
+      : '<div class="db-empty">ยังไม่มีรายชื่อที่บันทึกไว้</div>';
+    ov.innerHTML = `<div class="edit-part-dialog">
+      <div class="epm-head"><span>👥 จัดการอีเมลผู้รับ</span><button type="button" class="epm-x">✕</button></div>
+      <div class="epm-body">
+        <div class="epm-note">รายชื่อที่บันทึกไว้จะโผล่เป็นตัวเลือกอัตโนมัติในช่อง To/CC ตอนส่งอีเมล (ใช้ได้ทุกคน แก้ไขได้เฉพาะ Power User)</div>
+        <label>ชื่อ<input type="text" class="er-name" placeholder="เช่น Phutthiphong"></label>
+        <label>อีเมล *<input type="email" class="er-email" placeholder="name@company.com" autocomplete="off"></label>
+        <div class="db-status-line err er-err" style="display:none;"></div>
+        <button type="button" class="btn btn-primary er-add" style="width:100%;margin-top:4px;">＋ เพิ่มรายชื่อ</button>
+        <div class="epm-restore-list" style="margin-top:14px;">${list}</div>
+      </div>
+      <div class="epm-actions"><button type="button" class="btn er-close">ปิด</button></div>
+    </div>`;
+    ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
+    ov.querySelector('.er-close').onclick = ()=>userDismissTopModal();
+    ov.querySelectorAll('.er-del').forEach(btn=>{
+      btn.onclick = async ()=>{
+        if(!confirm('ลบ ' + btn.dataset.email + ' ออกจากรายชื่อที่บันทึกไว้?')) return;
+        btn.disabled = true;
+        try{
+          await lookupApiCall('deleteEmailRecipient', { email: btn.dataset.email });
+          await loadEmailRecipients();
+          render();
+        }catch(err){ alert('ลบไม่สำเร็จ: ' + (err.message||err)); btn.disabled = false; }
+      };
+    });
+    ov.querySelector('.er-add').onclick = async ()=>{
+      const nameInp = ov.querySelector('.er-name'), emailInp = ov.querySelector('.er-email');
+      const errEl = ov.querySelector('.er-err');
+      const email = emailInp.value.trim();
+      if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+        errEl.textContent = 'กรุณาใส่อีเมลให้ถูกต้อง'; errEl.style.display=''; emailInp.focus(); return;
+      }
+      const btn = ov.querySelector('.er-add'); btn.disabled = true;
+      try{
+        await lookupApiCall('addEmailRecipient', { email, name: nameInp.value.trim(), addedBy: getSessionEditor()||'' });
+        await loadEmailRecipients();
+        render();
+      }catch(err){
+        errEl.textContent = 'เพิ่มไม่สำเร็จ: ' + (err.message||err); errEl.style.display='';
+        btn.disabled = false;
+      }
+    };
+  };
+  render();
+  ov.addEventListener('click', e=>{ if(e.target===ov) userDismissTopModal(); });
+  document.body.appendChild(ov);
+  modalOpened();
+  loadEmailRecipients().then(render);
+}
 
 /* ---------------- Tab-scoped editor session ----------------
    The "session" in this app is the remembered editor identity (the name used to
