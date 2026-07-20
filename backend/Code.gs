@@ -73,6 +73,7 @@ function handleRequest(e) {
       case 'deleteRecord':  result = deleteRecord(params); break;
       case 'deleteAlias':   result = deleteAlias(params); break;
       case 'uploadImage':   result = uploadImage(params); break;
+      case 'uploadPdf':     result = uploadPdf(params); break;
       case 'setImageURL':   result = setImageURL(params); break;
       case 'getImageBytes': result = getImageBytes(params); break;
       case 'repairImages':  result = repairImages(params); break;
@@ -556,6 +557,38 @@ function uploadImage(params) {
   // Use the thumbnail-friendly URL format that works reliably in <img> tags
   const url = 'https://lh3.googleusercontent.com/d/' + fileId;
   return { success: true, url: url, fileId: fileId, shared: shared };
+}
+
+// Uploads a base64 PDF to a dedicated Drive folder and returns a view link.
+// Used by the app's ✉ Send-to-email flow: mailto: cannot carry an attachment,
+// so the PDF rides the email as a Drive link instead.
+const PDF_FOLDER_NAME = 'WarrantyApp Sent PDFs';
+function getPdfFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const cached = props.getProperty('pdfFolderId');
+  if (cached) {
+    try { return DriveApp.getFolderById(cached); } catch (e) {}
+  }
+  const it = DriveApp.getFoldersByName(PDF_FOLDER_NAME);
+  const folder = it.hasNext() ? it.next() : DriveApp.createFolder(PDF_FOLDER_NAME);
+  props.setProperty('pdfFolderId', folder.getId());
+  return folder;
+}
+
+function uploadPdf(params) {
+  const base64 = params.base64;
+  if (!base64) throw new Error('base64 required');
+  let filename = String(params.filename || '').trim() || ('export_order_' + Date.now() + '.pdf');
+  if (!/\.pdf$/i.test(filename)) filename += '.pdf';
+  const blob = Utilities.newBlob(Utilities.base64Decode(base64), 'application/pdf', filename);
+  const file = getPdfFolder_().createFile(blob);
+  const shared = shareFileAnyone_(file);
+  return {
+    success: true,
+    url: 'https://drive.google.com/file/d/' + file.getId() + '/view',
+    fileId: file.getId(),
+    shared: shared
+  };
 }
 
 // Try anyone-with-link, then domain-with-link; never throws. Returns

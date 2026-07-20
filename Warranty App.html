@@ -4446,15 +4446,11 @@ function pdfSubject(){
     .filter(Boolean).join(' ').trim();
 }
 /* ==================== ส่งออก: การแบ่งหน้าที่ ====================
-   ✉ Send to email — ส่งใบเบิกเข้า "อีเมล" (ทีมใช้ Outlook)
-       mobile:  share sheet → เลือก Outlook → ไฟล์แนบอัตโนมัติ; ข้อความเมล
-                ถูกคัดลอกไว้ให้วางเหนือ signature
-       desktop / share ใช้ไม่ได้: เปิดร่าง mailto (ข้อความอยู่เหนือ signature)
-   📤 Share — ส่งไฟล์ PDF เข้า "แชท/แอปอื่นใดก็ได้" ไม่มีกรอบความเป็นเมล
-       สำเร็จ = จบที่ share sheet; ล้มเหลว = ชี้ไปปุ่ม Save PDF เท่านั้น
-   Both ride the same OS share sheet on mobile — the only web API that can
-   hand a FILE to another app — so the plumbing lives in shareFileViaSheet()
-   and the two buttons differ only in framing and fallback. */
+   ✉ Send to email — ตรวจทานในแอป (To/CC จากสมุดรายชื่อ) → อัพโหลด PDF ขึ้น
+       Drive ผ่าน backend → เปิดร่าง mailto พร้อมลิงก์ไฟล์ในเนื้อหา
+       (mailto แนบไฟล์ไม่ได้ ลิงก์แทน; ผู้ใช้กดส่งจริงในแอปเมลอีกที)
+   📤 Share — ส่งไฟล์ PDF เข้า "แชท/แอปอื่นใดก็ได้" ผ่าน OS share sheet
+       สำเร็จ = จบที่ share sheet; ล้มเหลว = ชี้ไปปุ่ม Save PDF เท่านั้น */
 
 function isMobileDevice(){
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
@@ -4518,65 +4514,15 @@ async function copyMessageQuiet(){
   try{ await navigator.clipboard.writeText(_emailDraftText || ''); return true; }catch(e){ return false; }
 }
 
-/* ---------- ✉ Send to email — FORCED into Outlook ----------
-   Skips the share sheet entirely and opens the Outlook app's own compose,
-   with subject+body riding the link — so the message sits ABOVE the
-   signature automatically, no clipboard paste step.
-   Platform trade-off (accepted): a deep link cannot carry an attachment —
-   only the share sheet can — so the note/toast direct to ⬇ Save PDF and
-   attaching inside Outlook. 📤 Share stays the auto-attach path.
-   Mechanics: Chrome on Android BLOCKS raw custom-scheme navigation from
-   pages (that's why the earlier ms-outlook:// attempt died there); the
-   supported route is an intent:// URL naming the package, with
-   browser_fallback_url taking over when Outlook isn't installed. iOS does
-   accept the raw scheme, with a visibility check falling back to mailto:.
-   Desktop keeps mailto: (Outlook desktop is the OS default there). */
-function openOutlookDeepLinkFallback(){
-  const subject = pdfSubject();
-  const note = '\n\n[ไฟล์ PDF: กด “Save PDF” ในแอปฟอร์ม แล้วแนบจากเครื่องก่อนส่ง]';
-  const q = 'subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent((_emailDraftText || '') + note);
-  const mailtoHref = 'mailto:?' + q;
-  const fire = href => { const a=document.createElement('a'); a.href=href; document.body.appendChild(a); a.click(); a.remove(); };
-  commitPdfAction();
-
-  if(!isMobileDevice()){
-    fire(mailtoHref);
-    flashStatus('เปิดร่างเมลแล้ว — กด “Save PDF” เพื่อดาวน์โหลดไฟล์แนบ', 6500);
-    return;
-  }
-  if(/Android/i.test(navigator.userAgent)){
-    fire('intent://compose?' + q +
-      '#Intent;scheme=ms-outlook;package=com.microsoft.office.outlook;S.browser_fallback_url=' +
-      encodeURIComponent(mailtoHref) + ';end');
-    flashStatus('เปิด Outlook แล้ว — ข้อความอยู่เหนือลายเซ็น · แนบไฟล์ด้วย “Save PDF”', 8000);
-    return;
-  }
-  // iOS: raw scheme; if Outlook is missing the page never backgrounds → mailto.
-  let opened = false;
-  const onHide = ()=>{ if(document.visibilityState === 'hidden') opened = true; };
-  document.addEventListener('visibilitychange', onHide);
-  try{ window.location.href = 'ms-outlook://compose?' + q; }catch(e){}
-  setTimeout(()=>{
-    document.removeEventListener('visibilitychange', onHide);
-    if(opened) flashStatus('เปิด Outlook แล้ว — แนบไฟล์ด้วย “Save PDF”', 8000);
-    else { fire(mailtoHref); flashStatus('ไม่พบแอป Outlook — เปิดแอปเมลเริ่มต้นแทน · แนบไฟล์ด้วย “Save PDF”', 6500); }
-  }, 1800);
-}
-
-/* ---------- ✉ Send to email — auto-attach via Power Automate + Outlook ----------
-   A deep link (openOutlookDeepLinkFallback above) can never carry an
-   attachment — only a real backend can. This POSTs {to, cc, subject, body,
-   fileName, fileContentBase64} to a Power Automate flow whose "Send an
-   email (V2)" (Outlook connector) action actually sends the mail with the
-   PDF attached — no share sheet, no app hand-off, no manual attach step.
-   Trade-off (deliberate, confirmed with the user): the Outlook connector's
-   standard action SENDS immediately — there is no "create draft" action to
-   review inside Outlook — so this app supplies its own review step
-   (openSendReviewModal) with an explicit confirm before the real send call.
-   Until POWER_AUTOMATE_SEND_URL is configured, falls back to the Outlook
-   app deep link (no auto-attach) so the button never dead-ends mid-setup. */
-const POWER_AUTOMATE_SEND_URL = 'PASTE_YOUR_POWER_AUTOMATE_HTTP_URL_HERE';
-
+/* ---------- ✉ Send to email — upload PDF to Drive, link it in a mailto draft ----------
+   mailto: cannot carry an attachment and every auto-attach route field-failed
+   (share sheet: Android refusals; Outlook deep link: never opened; Power
+   Automate: HTTP trigger needs a Premium license). So the file travels as a
+   LINK instead: the review modal (To/CC with the saved-recipient datalist)
+   uploads the PDF via the existing Apps Script backend (uploadPdf → Drive,
+   anyone-with-link), then opens a normal mailto draft with the link in the
+   body — works on every platform, and the mail app itself is the final
+   review/send step. */
 function blobToBase64(blob){
   return new Promise((resolve, reject)=>{
     const reader = new FileReader();
@@ -4588,11 +4534,6 @@ function blobToBase64(blob){
 
 function emailCurrentPdf(){
   if(!_pdfPreviewUrl) return;
-  if(POWER_AUTOMATE_SEND_URL.indexOf('PASTE_YOUR') === 0){
-    flashStatus('ยังไม่ได้ตั้งค่าระบบส่งอีเมลอัตโนมัติ — เปิดแอป Outlook แทน (ไม่แนบไฟล์อัตโนมัติ)', 6000);
-    openOutlookDeepLinkFallback();
-    return;
-  }
   openSendReviewModal();
 }
 
@@ -4602,8 +4543,8 @@ function openSendReviewModal(){
   ov.innerHTML = `<div class="edit-part-dialog">
     <div class="epm-head"><span>ตรวจทานก่อนส่งอีเมล</span><button type="button" class="epm-x">✕</button></div>
     <div class="epm-body">
-      <div class="epm-note">ระบบจะส่งอีเมลออกทันทีเมื่อกด “ส่งอีเมล” ด้านล่าง — ตรวจข้อมูลให้ครบก่อน</div>
-      <label>ถึง (To) *<input type="email" class="srm-to" list="srmRecipientsList" placeholder="name@company.com" autocomplete="off"></label>
+      <div class="epm-note">ระบบจะอัพโหลดไฟล์ PDF แล้วเปิดร่างอีเมลพร้อมลิงก์ไฟล์ในเนื้อหา — กดส่งจริงในแอปอีเมลอีกครั้ง</div>
+      <label>ถึง (To)<input type="email" class="srm-to" list="srmRecipientsList" placeholder="name@company.com (เว้นว่างได้ ไปเลือกในแอปเมล)" autocomplete="off"></label>
       <label>สำเนาถึง (CC)<input type="text" class="srm-cc" list="srmRecipientsList" placeholder="คั่นหลายอีเมลด้วย , (เว้นว่างได้)" autocomplete="off"></label>
       <datalist id="srmRecipientsList"></datalist>
       <label>หัวข้อ<input type="text" class="srm-subject" value="${escAttr(pdfSubject())}"></label>
@@ -4613,7 +4554,7 @@ function openSendReviewModal(){
     </div>
     <div class="epm-actions">
       <button type="button" class="btn srm-cancel">ยกเลิก</button>
-      <button type="button" class="btn btn-primary srm-send">ส่งอีเมล</button>
+      <button type="button" class="btn btn-primary srm-send">อัพโหลด &amp; เปิดร่างอีเมล</button>
     </div>
   </div>`;
   ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
@@ -4631,6 +4572,9 @@ function openSendReviewModal(){
   fillRecipientsList(_emailRecipientsCache);           // whatever's cached, immediately
   loadEmailRecipients().then(fillRecipientsList);       // then refresh from the server
 
+  // Once uploaded, the link is reused on retries (e.g. if the mailto step
+  // needs another tap) so the same PDF isn't uploaded twice.
+  let uploadedUrl = '';
   ov.querySelector('.srm-send').onclick = async ()=>{
     const to = toInp.value.trim();
     const cc = ov.querySelector('.srm-cc').value.trim();
@@ -4638,22 +4582,31 @@ function openSendReviewModal(){
     const body = ov.querySelector('.srm-body').value;
     const errEl = ov.querySelector('.srm-err');
     const showErr = m => { errEl.textContent = m; errEl.style.display=''; };
-    if(!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)){ showErr('กรุณาใส่อีเมลผู้รับให้ถูกต้อง'); toInp.focus(); return; }
+    errEl.style.display = 'none';
+    if(to && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)){ showErr('รูปแบบอีเมลผู้รับไม่ถูกต้อง'); toInp.focus(); return; }
     if(!_pdfBlob){ showErr('ไม่พบไฟล์ PDF — กลับไปกด 📄 เพื่อสร้างใหม่'); return; }
-    const btn = ov.querySelector('.srm-send'); btn.disabled = true; btn.textContent = 'กำลังส่ง...';
+    const btn = ov.querySelector('.srm-send');
+    btn.disabled = true; btn.textContent = 'กำลังอัพโหลดไฟล์...';
     try{
-      const fileContentBase64 = await blobToBase64(_pdfBlob);
-      const res = await fetch(POWER_AUTOMATE_SEND_URL, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ to, cc, subject, body, fileName: _pdfPreviewFilename||'export_order.pdf', fileContentBase64 })
-      });
-      if(!res.ok) throw new Error('HTTP ' + res.status);
+      if(!uploadedUrl){
+        const base64 = await blobToBase64(_pdfBlob);
+        const r = await lookupApiCall('uploadPdf', { base64, filename: _pdfPreviewFilename || 'export_order.pdf' });
+        uploadedUrl = r.url;
+        if(r.shared === false) flashStatus('อัพโหลดแล้ว แต่เปิดลิงก์สาธารณะไม่ได้ — ผู้รับอาจต้องขอสิทธิ์เข้าถึงไฟล์', 7000);
+      }
+      const q = [];
+      if(cc) q.push('cc=' + encodeURIComponent(cc));
+      q.push('subject=' + encodeURIComponent(subject));
+      q.push('body=' + encodeURIComponent(body + '\n\n📎 ไฟล์ PDF: ' + uploadedUrl));
+      const a = document.createElement('a');
+      a.href = 'mailto:' + encodeURIComponent(to) + '?' + q.join('&');
+      document.body.appendChild(a); a.click(); a.remove();
       commitPdfAction();
-      flashStatus('ส่งอีเมลแล้ว ✓ (แนบ PDF อัตโนมัติ)', 6000);
+      flashStatus('เปิดร่างอีเมลแล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — กดส่งในแอปเมลอีกครั้ง', 7000);
       userDismissTopModal();
     }catch(err){
-      btn.disabled = false; btn.textContent = 'ส่งอีเมล';
-      showErr('ส่งไม่สำเร็จ: ' + (err && err.message ? err.message : err));
+      btn.disabled = false; btn.textContent = 'อัพโหลด & เปิดร่างอีเมล';
+      showErr('อัพโหลดไม่สำเร็จ: ' + (err && err.message ? err.message : err) + ' — หรือกด ⬇ Save PDF แล้วแนบเอง');
     }
   };
 }
