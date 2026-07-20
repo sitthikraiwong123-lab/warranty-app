@@ -4597,7 +4597,7 @@ function openSendReviewModal(){
     </div>
     <div class="epm-actions">
       <button type="button" class="btn srm-cancel">ยกเลิก</button>
-      <button type="button" class="btn btn-primary srm-send">${paMode?'ส่งอีเมล':'อัพโหลดไฟล์ PDF'}</button>
+      <button type="button" class="btn btn-primary srm-send">${paMode?'ส่งอีเมล':'🟦 ส่งเข้า Outlook'}</button>
     </div>
   </div>`;
   ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
@@ -4627,8 +4627,13 @@ function openSendReviewModal(){
   renderRecipients();                                   // whatever's cached, immediately
   loadEmailRecipients().then(renderRecipients);          // then refresh from the server
 
-  // Non-PA path is two-phase; once uploaded, the link is kept so a retry of
-  // the Outlook step never re-uploads the same PDF.
+  // Non-PA: ONE tap opens Outlook. The catch is that the PDF must be uploaded
+  // first (async) to get a link, and an await eats the click gesture so a
+  // window opened afterwards is popup-blocked. Fix: reserve the Outlook window
+  // SYNCHRONOUSLY at the top of the handler (about:blank, still inside the
+  // gesture), upload, then redirect that same window to the compose URL. If the
+  // browser blocks even that reserve (win===null), we keep the uploaded link
+  // and fall back to a second tap — so the worst case degrades, never dead-ends.
   let uploadedUrl = '';
   const joinEmails = rows => rows.map(r => r.Email).join(';');
   const outlookComposeUrl = (subject, body)=>{
@@ -4637,6 +4642,14 @@ function openSendReviewModal(){
     q.push('subject=' + encodeURIComponent(subject));
     q.push('body=' + encodeURIComponent(body));
     return 'https://outlook.office.com/mail/deeplink/compose?' + q.join('&');
+  };
+  const openOutlook = (win, subject, body)=>{
+    const url = outlookComposeUrl(subject, body + '\n\n📎 ไฟล์ PDF: ' + uploadedUrl);
+    if(win && !win.closed){ win.location.href = url; return true; }
+    const a = document.createElement('a');
+    a.href = url; a.target = '_blank'; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+    return true;
   };
   ov.querySelector('.srm-send').onclick = async ()=>{
     const subject = ov.querySelector('.srm-subject').value.trim();
@@ -4647,20 +4660,19 @@ function openSendReviewModal(){
     if(!toList().length){ showErr('ยังไม่มีผู้รับ (To) ในรายชื่อ'); return; }
     if(!_pdfBlob){ showErr('ไม่พบไฟล์ PDF — กลับไปกด 📄 เพื่อสร้างใหม่'); return; }
 
-    // Phase 2 (non-PA): the upload already finished — this tap only opens
-    // Outlook, so the gesture survives and the window isn't popup-blocked.
+    // Fallback second tap: upload already done last time but the window was
+    // popup-blocked — this fresh gesture opens Outlook straight away.
     if(!paMode && uploadedUrl){
-      const a = document.createElement('a');
-      a.href = outlookComposeUrl(subject, body + '\n\n📎 ไฟล์ PDF: ' + uploadedUrl);
-      a.target = '_blank'; a.rel = 'noopener';
-      document.body.appendChild(a); a.click(); a.remove();
+      openOutlook(null, subject, body);
       commitPdfAction();
       flashStatus('เปิด Outlook แล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — กดส่งใน Outlook อีกครั้ง', 7000);
       userDismissTopModal();
       return;
     }
 
-    btn.disabled = true; btn.textContent = paMode ? 'กำลังส่ง...' : 'กำลังอัพโหลดไฟล์...';
+    // Reserve the Outlook window NOW, before any await, so it isn't blocked.
+    const win = paMode ? null : window.open('about:blank', '_blank');
+    btn.disabled = true; btn.textContent = paMode ? 'กำลังส่ง...' : 'กำลังเปิด Outlook...';
     try{
       if(paMode){
         const fileContentBase64 = await blobToBase64(_pdfBlob);
@@ -4683,10 +4695,19 @@ function openSendReviewModal(){
       const r = await lookupApiCall('uploadPdf', { base64, filename: _pdfPreviewFilename || 'export_order.pdf' });
       uploadedUrl = r.url;
       if(r.shared === false) flashStatus('อัพโหลดแล้ว แต่เปิดลิงก์สาธารณะไม่ได้ — ผู้รับอาจต้องขอสิทธิ์เข้าถึงไฟล์', 7000);
-      btn.disabled = false; btn.textContent = '🟦 เปิด Outlook ส่งเมล';
-      flashStatus('ไฟล์พร้อมแล้ว ✓ — กดปุ่มอีกครั้งเพื่อเปิด Outlook', 5000);
+      if(win && !win.closed){
+        openOutlook(win, subject, body);
+        commitPdfAction();
+        flashStatus('เปิด Outlook แล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — กดส่งใน Outlook อีกครั้ง', 7000);
+        userDismissTopModal();
+      }else{
+        // Reserve was blocked — keep the link, let a second tap open Outlook.
+        btn.disabled = false; btn.textContent = '🟦 เปิด Outlook ส่งเมล';
+        flashStatus('ไฟล์พร้อมแล้ว ✓ — กดปุ่มอีกครั้งเพื่อเปิด Outlook', 5000);
+      }
     }catch(err){
-      btn.disabled = false; btn.textContent = paMode ? 'ส่งอีเมล' : 'อัพโหลดไฟล์ PDF';
+      if(win && !win.closed) win.close();
+      btn.disabled = false; btn.textContent = paMode ? 'ส่งอีเมล' : 'ส่งเข้า Outlook';
       showErr((paMode?'ส่งไม่สำเร็จ: ':'อัพโหลดไม่สำเร็จ: ') + (err && err.message ? err.message : err) + ' — หรือกด ⬇ Save PDF แล้วแนบเอง');
     }
   };
