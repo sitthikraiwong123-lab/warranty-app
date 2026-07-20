@@ -4444,104 +4444,130 @@ function pdfSubject(){
   return [(order.type||'Warranty'), 'Part Order', order.customer ? '- '+order.customer : '']
     .filter(Boolean).join(' ').trim();
 }
-/* Synchronous on purpose: navigator.share() only works inside the tap's user
-   gesture, and awaiting a fetch first eats that gesture on mobile browsers —
-   the share sheet then silently never opens. The blob is kept from export. */
-function currentPdfFile(){
-  try{
-    if(!_pdfBlob) return null;
-    return new File([_pdfBlob], _pdfPreviewFilename || 'export_order.pdf', { type:'application/pdf' });
-  }catch(e){ return null; }
-}
+/* ==================== ส่งออก: การแบ่งหน้าที่ ====================
+   ✉ Send to email — ส่งใบเบิกเข้า "อีเมล" (ทีมใช้ Outlook)
+       mobile:  share sheet → เลือก Outlook → ไฟล์แนบอัตโนมัติ; ข้อความเมล
+                ถูกคัดลอกไว้ให้วางเหนือ signature
+       desktop / share ใช้ไม่ได้: เปิดร่าง mailto (ข้อความอยู่เหนือ signature)
+   📤 Share — ส่งไฟล์ PDF เข้า "แชท/แอปอื่นใดก็ได้" ไม่มีกรอบความเป็นเมล
+       สำเร็จ = จบที่ share sheet; ล้มเหลว = ชี้ไปปุ่ม Save PDF เท่านั้น
+   Both ride the same OS share sheet on mobile — the only web API that can
+   hand a FILE to another app — so the plumbing lives in shareFileViaSheet()
+   and the two buttons differ only in framing and fallback. */
 
-/* Auto-attach + message-above-signature, reconciled.
-   Only Web Share can attach a file to a mail compose (mailto: and app
-   schemes cannot carry attachments, and the ms-outlook:// deep link didn't
-   even open the app on the team's phones). But sharing TEXT through Web
-   Share is what caused the original complaint: Outlook appends shared text
-   below the signature it has already inserted, and no share parameter
-   controls that.
-   So on mobile the file is shared ALONE — no text, so nothing can land
-   under the signature — and the message is placed on the clipboard instead;
-   one paste at the top of the mail puts it above the signature. The share
-   sheet also solves the app-choice problem: the user picks Outlook there.
-   Desktop keeps download + mailto: (body pre-filled above the signature,
-   attach by hand), since desktop share sheets are unreliable for mail. */
 function isMobileDevice(){
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
     || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent)); // iPadOS masquerades as Mac
 }
+
+/* Synchronous on purpose: navigator.share() only works inside the tap's user
+   gesture, and awaiting a fetch first eats that gesture on mobile browsers —
+   the share sheet then silently never opens. The blob is kept from export.
+   asciiName: Android's share intent is known to choke on non-ASCII filenames
+   (iOS is fine) — the safe() filename builder deliberately keeps Thai
+   characters, so the SHARED copy gets an ASCII-only name; the downloaded
+   copy keeps the full name. */
+function currentPdfFile(asciiName){
+  try{
+    if(!_pdfBlob) return null;
+    let name = _pdfPreviewFilename || 'export_order.pdf';
+    if(asciiName){
+      name = name.replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, '_').replace(/_{2,}/g, '_');
+      if(!/\.pdf$/i.test(name)) name += '.pdf';
+      if(!/[A-Za-z0-9]/.test(name.slice(0, -4))) name = 'export_order.pdf';
+    }
+    return new File([_pdfBlob], name, { type:'application/pdf' });
+  }catch(e){ return null; }
+}
+
+/* One share-sheet attempt; reports WHERE it failed so the toast can say the
+   exact stage — that's what turns the next field report into a diagnosis.
+   Stages: no-api | no-file-share | busy | cancelled | refused.
+   Payload is files+title ONLY (never text: the team's phones refuse
+   text-carrying file shares, and shared text is also what Outlook drops
+   below its signature). navigator.share must stay the first
+   gesture-consuming call in the tap — nothing may run before it.
+   _shareInFlight guards the known Android bug where the share promise never
+   settles: a second tap would then throw InvalidStateError; the flag also
+   self-resets after 15s in case the promise is truly stuck. */
+let _shareInFlight = false;
+async function shareFileViaSheet(title){
+  if(!navigator.share) return { ok:false, stage:'no-api' };
+  const file = currentPdfFile(true);
+  if(!file || !navigator.canShare || !navigator.canShare({ files:[file] })) return { ok:false, stage:'no-file-share' };
+  if(_shareInFlight) return { ok:false, stage:'busy' };
+  _shareInFlight = true;
+  const stuckReset = setTimeout(()=>{ _shareInFlight = false; }, 15000);
+  try{
+    await navigator.share({ files:[file], title: title });
+    return { ok:true };
+  }catch(err){
+    if(err && err.name === 'AbortError') return { ok:false, stage:'cancelled' };
+    return { ok:false, stage:'refused', err };
+  }finally{
+    clearTimeout(stuckReset);
+    _shareInFlight = false;
+  }
+}
+
+/* Puts the email/chat message on the clipboard AFTER a share (activation is
+   often gone by then, especially on Android — quiet failure; the preview's
+   "คัดลอก" button is the manual path). */
+async function copyMessageQuiet(){
+  try{ await navigator.clipboard.writeText(_emailDraftText || ''); return true; }catch(e){ return false; }
+}
+
+/* ---------- ✉ Send to email ---------- */
 async function emailCurrentPdf(){
   if(!_pdfPreviewUrl) return;
   const subject = pdfSubject();
   const body = _emailDraftText || '';
-  const file = currentPdfFile();
+  let diag = '';
 
-  let shareErr = null;
-  if(isMobileDevice() && file && navigator.canShare && navigator.canShare({ files:[file] })){
-    try{
-      // navigator.share MUST be the first gesture-consuming call in the tap.
-      // Field-tested failure: a clipboard.writeText fired before it consumed
-      // the transient activation and share() then threw NotAllowedError on
-      // Android — so nothing runs before this line.
-      await navigator.share({ files:[file], title: subject });   // deliberately NO text
+  if(isMobileDevice()){
+    const res = await shareFileViaSheet(subject);
+    if(res.ok){
       commitPdfAction();
-      // Clipboard AFTER the share sheet returns. Activation is usually gone by
-      // then, so this often fails on Android — the preview's "คัดลอก" button
-      // next to the email draft is the manual path in that case.
-      let copied = false;
-      try{ await navigator.clipboard.writeText(body); copied = true; }catch(e){}
+      const copied = await copyMessageQuiet();
       flashStatus(copied
         ? 'แนบ PDF ให้แล้ว ✓ คัดลอกข้อความไว้แล้ว — แตะค้างบรรทัดบนสุดของเมล แล้วกด “วาง/Paste”'
         : 'แนบ PDF ให้แล้ว ✓ — คัดลอกข้อความได้จากปุ่ม “คัดลอก” ในหน้า preview แล้ววางบนสุดของเมล', 9000);
       return;
-    }catch(err){
-      if(err && err.name === 'AbortError') return;   // user cancelled — don't log, don't fall back
-      shareErr = err;                                 // refused → open a draft instead
     }
+    if(res.stage === 'cancelled') return;            // user closed the sheet — do nothing
+    if(res.stage === 'busy'){ flashStatus('การแชร์ครั้งก่อนยังค้างอยู่ — รอสักครู่แล้วลองใหม่', 5000); return; }
+    diag = res.stage + (res.err ? ':' + (res.err.name || 'error') : '');
   }
-  // Desktop, no file-share support, or share refused: open a mailto draft.
-  // No forced download here — the ⬇ Save PDF button already covers the file.
+  // Desktop, or mobile share unavailable/refused: open a mailto draft.
+  // No forced download — ⬇ Save PDF covers the file.
   const note = '\n\n[ยังไม่ได้แนบไฟล์ — กดปุ่ม “Save PDF” เพื่อดาวน์โหลด แล้วแนบก่อนส่ง]';
   const a = document.createElement('a');
   a.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body + note);
   document.body.appendChild(a); a.click(); a.remove();
   commitPdfAction();
-  flashStatus(shareErr
-    ? ('แชร์ไม่สำเร็จ (' + (shareErr.name||'error') + ') — เปิดร่างเมลแล้ว · กด “Save PDF” เพื่อได้ไฟล์แนบ')
+  flashStatus(diag
+    ? ('แชร์เข้าเมลไม่ได้ (' + diag + ') — เปิดร่างเมลแล้ว · กด “Save PDF” เพื่อได้ไฟล์แนบ')
     : 'เปิดร่างเมลแล้ว — กด “Save PDF” เพื่อดาวน์โหลดไฟล์แนบ', 6500);
 }
 
-/* Share to a chat / any other app. Same Web Share plumbing as the email action,
-   but without the mail framing — and no mailto fallback, since a browser that
-   can't share files has nothing to hand the PDF to but a download. */
+/* ---------- 📤 Share (any app) ---------- */
 async function sharePdf(){
   if(!_pdfPreviewUrl) return;
-  const file = currentPdfFile();
-  let shareErr = null;
-  if(file && navigator.canShare && navigator.canShare({ files:[file] })){
-    try{
-      // Same payload as the email button's share, which is the one the
-      // team's phones accept: files + title ONLY. The old payload also
-      // carried `text` and was refused (NotAllowedError) on those phones,
-      // which sent every tap into the download fallback — the message text
-      // now goes onto the clipboard after the sheet instead.
-      await navigator.share({ files:[file], title: pdfSubject() });
-      commitPdfAction();
-      let copied = false;
-      try{ await navigator.clipboard.writeText(_emailDraftText || ''); copied = true; }catch(e){}
-      flashStatus(copied ? 'แชร์แล้ว ✓ คัดลอกข้อความไว้ให้แล้ว — วางในแชทได้เลย' : 'แชร์แล้ว ✓', 6000);
-      return;
-    }catch(err){
-      if(err && err.name === 'AbortError') return;                 // user cancelled — do nothing
-      shareErr = err;
-    }
+  const res = await shareFileViaSheet(pdfSubject());
+  if(res.ok){
+    commitPdfAction();
+    const copied = await copyMessageQuiet();
+    flashStatus(copied ? 'แชร์แล้ว ✓ คัดลอกข้อความไว้ให้แล้ว — วางในแชทได้เลย' : 'แชร์แล้ว ✓', 6000);
+    return;
   }
-  // No forced download — ⬇ Save PDF already covers getting the file. And since
-  // nothing left the app here, there's no ledger write / run-number advance.
-  flashStatus(shareErr
-    ? ('แชร์ไม่สำเร็จ (' + (shareErr.name||'error') + ') — กด “Save PDF” เพื่อดาวน์โหลดแล้วส่งต่อเอง')
-    : 'เบราว์เซอร์นี้แชร์ไฟล์ไม่ได้ — กด “Save PDF” เพื่อดาวน์โหลดแล้วส่งต่อเอง', 6500);
+  if(res.stage === 'cancelled') return;
+  if(res.stage === 'busy'){ flashStatus('การแชร์ครั้งก่อนยังค้างอยู่ — รอสักครู่แล้วลองใหม่', 5000); return; }
+  // Failure: nothing left the app → no ledger write, no run-number burn, no
+  // forced download. The toast names the exact failing stage for diagnosis.
+  const why = res.stage === 'no-api' ? 'เบราว์เซอร์ไม่มีระบบแชร์'
+    : res.stage === 'no-file-share' ? 'เบราว์เซอร์นี้แชร์ไฟล์ไม่ได้'
+    : ('แชร์ถูกปฏิเสธ: ' + (res.err && res.err.name || 'error'));
+  flashStatus(why + ' — กด “Save PDF” เพื่อดาวน์โหลดแล้วส่งต่อเอง', 6500);
 }
 
 function savePdfToDevice(){
