@@ -726,6 +726,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
       <button class="tm-item" id="btnPowerUser" role="menuitem" title="ล็อกอินเพื่อเปิด-ปิดฟังก์ชันขั้นสูง">🔑 Power User</button>
       <button class="tm-item" id="btnFmtToggle" role="menuitem" style="display:none;" title="เปิด-ปิด toolbar จัดข้อความ (B/I/U/สี) ในช่อง Description">🛠 Format toolbar: ปิด</button>
       <button class="tm-item" id="btnEmailRecipients" role="menuitem" style="display:none;" title="เพิ่ม/ลบอีเมลผู้รับที่บันทึกไว้ — ใช้เลือกตอนส่งอีเมล">👥 จัดการอีเมลผู้รับ</button>
+      <button class="tm-item" id="btnPaSendToggle" role="menuitem" style="display:none;" title="ส่งอีเมล+แนบไฟล์ผ่าน Power Automate โดยตรง — ต้องมี license และ flow ต้องไม่ถูกระงับ">⚡ Power Automate ส่งตรง: ปิด</button>
       <button class="tm-item" id="btnRunNumToggle" role="menuitem" style="display:none;" title="เปิด-ปิดการรันเลขที่เอกสาร (TL{ปี}-{เลข}) — ตั้งค่าเป็นกลาง มีผลกับทุกคน">🔢 Running number: ปิด</button>
     </div>
   </div>
@@ -1491,9 +1492,10 @@ let lookupOnline = navigator.onLine;
    flips a flag once and every device picks it up on next load — no per-device
    drift. Cached in lkv for instant/offline start; refreshed on load and after
    each sync. See getAppSettings/setAppSettings/reserveExportNumber in Code.gs. */
-const DEFAULT_APP_SETTINGS = { fmtToolbar:false, runNumberEnabled:false, runPrefix:'TL', runYear:(new Date()).getFullYear(), runNext:1 };
+const DEFAULT_APP_SETTINGS = { fmtToolbar:false, runNumberEnabled:false, paSend:false, runPrefix:'TL', runYear:(new Date()).getFullYear(), runNext:1 };
 let appSettings = Object.assign({}, DEFAULT_APP_SETTINGS);
 function fmtToolbarOn(){ return !!appSettings.fmtToolbar; }
+function paSendOn(){ return !!appSettings.paSend; }
 function runNumberEnabled(){ return !!appSettings.runNumberEnabled; }
 function pad3(n){ return ('000' + (parseInt(n,10)||1)).slice(-3); }
 function runNumberPreview(){
@@ -4532,19 +4534,55 @@ function blobToBase64(blob){
   });
 }
 
+/* ---------- optional direct send via Power Automate ----------
+   The user's flow ("WarrantyApp - Send Email": HTTP trigger → Outlook
+   "Send an email V2") exists but sits Suspended until a Premium license
+   lands. The ⚡ Power-User toggle activates this path: it first PROBES the
+   trigger with an empty body — no recipient, so no mail can ever go out —
+   and only enables when the flow answers as un-suspended. While the flag
+   (appSettings.paSend, shared server-side) is ON, the review modal sends
+   the real email with the PDF attached via the flow; OFF = upload+mailto. */
+const POWER_AUTOMATE_SEND_URL = 'https://defaultb19434a9ca324427917c5491d81bf4.fe.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/29/workflows/f7b9d69aa3d74e9db9ee75dff6984b91/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=7ISbg1YkZvWNbYQ9SyBMVT26UiQ7GZqBWEaRV5xqAA4';
+
+/* Returns 'ok' | 'suspended' | 'error: ...' — never sends an email. */
+async function probePowerAutomateFlow(){
+  try{
+    const res = await fetch(POWER_AUTOMATE_SEND_URL, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
+    });
+    if(res.ok) return 'ok';   // 202: run started; empty body → email step fails, nothing sent
+    let code = '';
+    try{ const j = await res.json(); code = j && j.error && j.error.code || ''; }catch(e){}
+    if(code === 'WorkflowTriggerIsNotEnabled') return 'suspended';
+    // A schema-validation rejection still proves the trigger is awake; anything
+    // else (bad signature, auth, …) is a real problem — don't enable on it.
+    if(/Schema|Validation/i.test(code)) return 'ok';
+    return 'error: ' + (code || ('HTTP ' + res.status));
+  }catch(err){
+    return 'error: ' + (err && err.message ? err.message : err);
+  }
+}
+
 function emailCurrentPdf(){
   if(!_pdfPreviewUrl) return;
   openSendReviewModal();
 }
 
 function openSendReviewModal(){
+  // Two modes, chosen at open time by the shared ⚡ flag:
+  //   paMode — Power Automate flow sends the mail (PDF attached) IMMEDIATELY
+  //            on confirm, so To is required and the wording says "ส่งทันที".
+  //   else   — upload to Drive + mailto draft; the mail app is the real send.
+  const paMode = paSendOn();
   const ov = document.createElement('div');
   ov.className = 'edit-part-modal open';
   ov.innerHTML = `<div class="edit-part-dialog">
     <div class="epm-head"><span>ตรวจทานก่อนส่งอีเมล</span><button type="button" class="epm-x">✕</button></div>
     <div class="epm-body">
-      <div class="epm-note">ระบบจะอัพโหลดไฟล์ PDF แล้วเปิดร่างอีเมลพร้อมลิงก์ไฟล์ในเนื้อหา — กดส่งจริงในแอปอีเมลอีกครั้ง</div>
-      <label>ถึง (To)<input type="email" class="srm-to" list="srmRecipientsList" placeholder="name@company.com (เว้นว่างได้ ไปเลือกในแอปเมล)" autocomplete="off"></label>
+      <div class="epm-note">${paMode
+        ? '⚡ ระบบจะส่งอีเมลออกทันทีพร้อมไฟล์แนบเมื่อกด “ส่งอีเมล” — ตรวจข้อมูลให้ครบก่อน'
+        : 'ระบบจะอัพโหลดไฟล์ PDF แล้วเปิดร่างอีเมลพร้อมลิงก์ไฟล์ในเนื้อหา — กดส่งจริงในแอปอีเมลอีกครั้ง'}</div>
+      <label>ถึง (To)${paMode?' *':''}<input type="email" class="srm-to" list="srmRecipientsList" placeholder="${paMode?'name@company.com':'name@company.com (เว้นว่างได้ ไปเลือกในแอปเมล)'}" autocomplete="off"></label>
       <label>สำเนาถึง (CC)<input type="text" class="srm-cc" list="srmRecipientsList" placeholder="คั่นหลายอีเมลด้วย , (เว้นว่างได้)" autocomplete="off"></label>
       <datalist id="srmRecipientsList"></datalist>
       <label>หัวข้อ<input type="text" class="srm-subject" value="${escAttr(pdfSubject())}"></label>
@@ -4554,7 +4592,7 @@ function openSendReviewModal(){
     </div>
     <div class="epm-actions">
       <button type="button" class="btn srm-cancel">ยกเลิก</button>
-      <button type="button" class="btn btn-primary srm-send">อัพโหลด &amp; เปิดร่างอีเมล</button>
+      <button type="button" class="btn btn-primary srm-send">${paMode?'ส่งอีเมล':'อัพโหลด &amp; เปิดร่างอีเมล'}</button>
     </div>
   </div>`;
   ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
@@ -4575,6 +4613,7 @@ function openSendReviewModal(){
   // Once uploaded, the link is reused on retries (e.g. if the mailto step
   // needs another tap) so the same PDF isn't uploaded twice.
   let uploadedUrl = '';
+  const btnLabel = paMode ? 'ส่งอีเมล' : 'อัพโหลด & เปิดร่างอีเมล';
   ov.querySelector('.srm-send').onclick = async ()=>{
     const to = toInp.value.trim();
     const cc = ov.querySelector('.srm-cc').value.trim();
@@ -4583,11 +4622,28 @@ function openSendReviewModal(){
     const errEl = ov.querySelector('.srm-err');
     const showErr = m => { errEl.textContent = m; errEl.style.display=''; };
     errEl.style.display = 'none';
+    if(paMode && !to){ showErr('กรุณาใส่อีเมลผู้รับ (ระบบส่งทันที ต้องมีผู้รับ)'); toInp.focus(); return; }
     if(to && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)){ showErr('รูปแบบอีเมลผู้รับไม่ถูกต้อง'); toInp.focus(); return; }
     if(!_pdfBlob){ showErr('ไม่พบไฟล์ PDF — กลับไปกด 📄 เพื่อสร้างใหม่'); return; }
     const btn = ov.querySelector('.srm-send');
-    btn.disabled = true; btn.textContent = 'กำลังอัพโหลดไฟล์...';
+    btn.disabled = true; btn.textContent = paMode ? 'กำลังส่ง...' : 'กำลังอัพโหลดไฟล์...';
     try{
+      if(paMode){
+        const fileContentBase64 = await blobToBase64(_pdfBlob);
+        const res = await fetch(POWER_AUTOMATE_SEND_URL, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ to, cc, subject, body, fileName: _pdfPreviewFilename||'export_order.pdf', fileContentBase64 })
+        });
+        if(!res.ok){
+          let code = ''; try{ const j = await res.json(); code = j && j.error && j.error.code || ''; }catch(e){}
+          if(code === 'WorkflowTriggerIsNotEnabled') throw new Error('Flow ถูกระงับอีกครั้ง (license?) — ให้ Power User ปิด ⚡ แล้วใช้แบบลิงก์แทน');
+          throw new Error(code || ('HTTP ' + res.status));
+        }
+        commitPdfAction();
+        flashStatus('ส่งอีเมลแล้ว ✓ (แนบ PDF อัตโนมัติ)', 6000);
+        userDismissTopModal();
+        return;
+      }
       if(!uploadedUrl){
         const base64 = await blobToBase64(_pdfBlob);
         const r = await lookupApiCall('uploadPdf', { base64, filename: _pdfPreviewFilename || 'export_order.pdf' });
@@ -4605,8 +4661,8 @@ function openSendReviewModal(){
       flashStatus('เปิดร่างอีเมลแล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — กดส่งในแอปเมลอีกครั้ง', 7000);
       userDismissTopModal();
     }catch(err){
-      btn.disabled = false; btn.textContent = 'อัพโหลด & เปิดร่างอีเมล';
-      showErr('อัพโหลดไม่สำเร็จ: ' + (err && err.message ? err.message : err) + ' — หรือกด ⬇ Save PDF แล้วแนบเอง');
+      btn.disabled = false; btn.textContent = btnLabel;
+      showErr((paMode?'ส่งไม่สำเร็จ: ':'อัพโหลดไม่สำเร็จ: ') + (err && err.message ? err.message : err) + ' — หรือกด ⬇ Save PDF แล้วแนบเอง');
     }
   };
 }
@@ -5057,6 +5113,11 @@ function refreshPowerMenuUI(){
   }
   const er = document.getElementById('btnEmailRecipients');
   if(er) er.style.display = on ? '' : 'none';
+  const pa = document.getElementById('btnPaSendToggle');
+  if(pa){
+    pa.style.display = on ? '' : 'none';
+    pa.textContent = '⚡ Power Automate ส่งตรง: ' + (paSendOn() ? 'เปิดอยู่ ✅' : 'ปิดอยู่');
+  }
   try{ renderRunNumber(); }catch(e){}   // keeps the chip + the ✏️ edit menu item in sync
 }
 
@@ -5141,6 +5202,31 @@ document.addEventListener('DOMContentLoaded', ()=>{
     flashStatus(next
       ? 'เปิด Running number แล้ว (มีผลกับทุกคน) — เลขจะรันอัตโนมัติทุกครั้งที่ Export'
       : 'ปิด Running number แล้ว (มีผลกับทุกคน)');
+  };
+  const pa = document.getElementById('btnPaSendToggle');
+  if(pa) pa.onclick = async ()=>{
+    if(!isPowerUser()) return;
+    if(paSendOn()){
+      await saveAppSettings({ paSend: false });
+      flashStatus('ปิด Power Automate ส่งตรงแล้ว (มีผลกับทุกคน) — กลับไปใช้อัพโหลด+ลิงก์ในร่างเมล');
+      return;
+    }
+    // Activating: probe the flow first (empty body — no email can go out).
+    pa.disabled = true; pa.textContent = '⚡ กำลังทดสอบ flow...';
+    const st = await probePowerAutomateFlow();
+    pa.disabled = false;
+    if(st === 'suspended'){
+      refreshPowerMenuUI();
+      flashStatus('Flow ยังถูกระงับ (Suspended) — ต้องมี Power Automate Premium license ก่อน จึงจะเปิดใช้ได้', 8000);
+      return;
+    }
+    if(st !== 'ok'){
+      refreshPowerMenuUI();
+      flashStatus('ทดสอบ flow ไม่ผ่าน (' + st + ') — ยังไม่เปิดใช้', 8000);
+      return;
+    }
+    await saveAppSettings({ paSend: true });   // global — applies to everyone
+    flashStatus('เปิด Power Automate ส่งตรงแล้ว ✅ (มีผลกับทุกคน) — ✉ Send to email จะส่งจริงพร้อมแนบไฟล์', 8000);
   };
   // btnRunNumEdit's click handler is wired in renderRunNumber (it depends on the
   // current order — edit this Draft's number vs the shared next number).
