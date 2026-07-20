@@ -4570,16 +4570,19 @@ function emailCurrentPdf(){
 }
 
 function openSendReviewModal(){
-  // Recipients are NOT typed per order — they come from the shared 👥 directory
-  // (EmailRecipients sheet: every 'to' row is addressed, every 'cc' row copied),
-  // shown here read-only for review. Two modes, chosen by the shared ⚡ flag:
-  //   paMode — Power Automate flow sends the mail (PDF attached) IMMEDIATELY
-  //            on confirm.
-  //   else   — upload to Drive, then a second tap opens OUTLOOK compose
-  //            (outlook.office.com deeplink — Outlook app on phones that have
-  //            it, Outlook web otherwise) with the file link in the body. Two
-  //            taps on purpose: the upload's await would eat the click gesture
-  //            and get the Outlook window popup-blocked on mobile.
+  // The To field is intentionally left to the user: recipient management lives
+  // in ☰ → 👥 จัดการอีเมลผู้รับ and does NOT feed the send flow (its per-order
+  // To logic isn't ready). This modal focuses on three things only — subject,
+  // body, and the PDF — and hands them to Outlook with To BLANK for the user
+  // to fill. Two modes, chosen by the shared ⚡ flag:
+  //   paMode — Power Automate flow sends the mail (PDF really attached)
+  //            IMMEDIATELY on confirm; it still needs a To, so in this mode
+  //            (Power-User + licensed only) recipients come from the directory.
+  //   else   — upload the PDF to Drive, then open OUTLOOK compose
+  //            (outlook.office.com deeplink) with subject + body + the file
+  //            LINK in the body, To left blank. A compose deep link cannot
+  //            carry a real attachment — only PA / the Graph API can — so the
+  //            file rides as a link here.
   const paMode = paSendOn();
   const ov = document.createElement('div');
   ov.className = 'edit-part-modal open';
@@ -4587,9 +4590,8 @@ function openSendReviewModal(){
     <div class="epm-head"><span>ตรวจทานก่อนส่งอีเมล</span><button type="button" class="epm-x">✕</button></div>
     <div class="epm-body">
       <div class="epm-note">${paMode
-        ? '⚡ ระบบจะส่งอีเมลออกทันทีพร้อมไฟล์แนบเมื่อกด “ส่งอีเมล” — ตรวจข้อมูลให้ครบก่อน'
-        : 'ระบบจะอัพโหลดไฟล์ PDF แล้วเปิด Outlook พร้อมลิงก์ไฟล์ในเนื้อหา — กดส่งจริงใน Outlook อีกครั้ง'}</div>
-      <div class="srm-recipients"></div>
+        ? '⚡ ระบบจะส่งอีเมลออกทันทีพร้อมไฟล์แนบเมื่อกด “ส่งอีเมล” — ผู้รับดึงจากสมุดรายชื่อ'
+        : 'ระบบจะอัพโหลดไฟล์ PDF แล้วเปิด Outlook พร้อมหัวข้อ+เนื้อหา+ลิงก์ไฟล์ — ช่อง “ถึง (To)” เว้นว่างให้กรอกเองใน Outlook'}</div>
       <label>หัวข้อ<input type="text" class="srm-subject" value="${escAttr(pdfSubject())}"></label>
       <label>เนื้อหา<textarea class="srm-body" rows="7">${escAttr(_emailDraftText||'')}</textarea></label>
       <div class="epm-note">แนบไฟล์: ${escHtml(_pdfPreviewFilename||'export_order.pdf')}</div>
@@ -4606,26 +4608,13 @@ function openSendReviewModal(){
   document.body.appendChild(ov);
   modalOpened();
 
-  // Read-only To/CC review, straight from the directory. Send stays disabled
-  // until at least one 'to' recipient exists.
   const btn = ov.querySelector('.srm-send');
+  // Recipients feed ONLY the PA path (which can't send with a blank To). The
+  // Outlook-deeplink path deliberately ignores them and leaves To blank.
   const toList = ()=> _emailRecipientsCache.filter(r => r.Type !== 'cc');
   const ccList = ()=> _emailRecipientsCache.filter(r => r.Type === 'cc');
-  const renderRecipients = ()=>{
-    const box = ov.querySelector('.srm-recipients');
-    const chip = r => `<span style="display:inline-block;border:1px solid var(--line);border-radius:12px;padding:2px 10px;margin:2px 4px 2px 0;font-size:12px;" title="${escAttr(r.Email)}">${escHtml(r.Name||r.Email)}</span>`;
-    const tos = toList(), ccs = ccList();
-    if(!tos.length){
-      box.innerHTML = `<div class="db-status-line err">ยังไม่มีผู้รับ (To) — ให้ Power User เพิ่มรายชื่อที่ ☰ → 👥 จัดการอีเมลผู้รับ</div>`;
-      btn.disabled = true;
-      return;
-    }
-    box.innerHTML = `<div style="margin-bottom:6px;"><b style="font-size:12px;">ถึง (To):</b><br>${tos.map(chip).join('')}</div>`
-      + (ccs.length ? `<div style="margin-bottom:6px;"><b style="font-size:12px;">สำเนาถึง (CC):</b><br>${ccs.map(chip).join('')}</div>` : '');
-    btn.disabled = false;
-  };
-  renderRecipients();                                   // whatever's cached, immediately
-  loadEmailRecipients().then(renderRecipients);          // then refresh from the server
+  const joinEmails = rows => rows.map(r => r.Email).join(';');
+  if(paMode) loadEmailRecipients();   // warm the cache for the PA send
 
   // Non-PA: ONE tap opens Outlook. The catch is that the PDF must be uploaded
   // first (async) to get a link, and an await eats the click gesture so a
@@ -4635,12 +4624,9 @@ function openSendReviewModal(){
   // browser blocks even that reserve (win===null), we keep the uploaded link
   // and fall back to a second tap — so the worst case degrades, never dead-ends.
   let uploadedUrl = '';
-  const joinEmails = rows => rows.map(r => r.Email).join(';');
+  // To is intentionally omitted → Outlook opens with the recipient field blank.
   const outlookComposeUrl = (subject, body)=>{
-    const q = ['to=' + encodeURIComponent(joinEmails(toList()))];
-    if(ccList().length) q.push('cc=' + encodeURIComponent(joinEmails(ccList())));
-    q.push('subject=' + encodeURIComponent(subject));
-    q.push('body=' + encodeURIComponent(body));
+    const q = ['subject=' + encodeURIComponent(subject), 'body=' + encodeURIComponent(body)];
     return 'https://outlook.office.com/mail/deeplink/compose?' + q.join('&');
   };
   const openOutlook = (win, subject, body)=>{
@@ -4657,15 +4643,15 @@ function openSendReviewModal(){
     const errEl = ov.querySelector('.srm-err');
     const showErr = m => { errEl.textContent = m; errEl.style.display=''; };
     errEl.style.display = 'none';
-    if(!toList().length){ showErr('ยังไม่มีผู้รับ (To) ในรายชื่อ'); return; }
     if(!_pdfBlob){ showErr('ไม่พบไฟล์ PDF — กลับไปกด 📄 เพื่อสร้างใหม่'); return; }
+    if(paMode && !toList().length){ showErr('โหมด ⚡ ต้องมีผู้รับ (To) — เพิ่มที่ ☰ → 👥 จัดการอีเมลผู้รับ'); return; }
 
     // Fallback second tap: upload already done last time but the window was
     // popup-blocked — this fresh gesture opens Outlook straight away.
     if(!paMode && uploadedUrl){
       openOutlook(null, subject, body);
       commitPdfAction();
-      flashStatus('เปิด Outlook แล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — กดส่งใน Outlook อีกครั้ง', 7000);
+      flashStatus('เปิด Outlook แล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่งใน Outlook', 7000);
       userDismissTopModal();
       return;
     }
@@ -4698,7 +4684,7 @@ function openSendReviewModal(){
       if(win && !win.closed){
         openOutlook(win, subject, body);
         commitPdfAction();
-        flashStatus('เปิด Outlook แล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — กดส่งใน Outlook อีกครั้ง', 7000);
+        flashStatus('เปิด Outlook แล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่งใน Outlook', 7000);
         userDismissTopModal();
       }else{
         // Reserve was blocked — keep the link, let a second tap open Outlook.
