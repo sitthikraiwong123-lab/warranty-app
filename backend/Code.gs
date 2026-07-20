@@ -1390,7 +1390,9 @@ function deletePendingPart(params) {
 // trust model as the other global settings in this app.
 // ============================================================
 const EMAILRECIPIENTS_SHEET = 'EmailRecipients';
-const EMAILRECIPIENTS_HEADERS = ['Email', 'Name', 'AddedBy', 'AddedAt'];
+// Type: 'to' | 'cc' — the send flow addresses every saved 'to' recipient and
+// copies every 'cc' one; there is no per-order picking in the app anymore.
+const EMAILRECIPIENTS_HEADERS = ['Email', 'Name', 'Type', 'AddedBy', 'AddedAt'];
 
 function getEmailRecipientsSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1410,10 +1412,15 @@ function getEmailRecipients(params) {
   const rows = [];
   values.forEach(function (v) {
     if (!String(v[0]).trim()) return;
-    rows.push({ Email: String(v[0]), Name: String(v[1] || ''), AddedBy: String(v[2] || ''),
-      AddedAt: v[3] instanceof Date ? v[3].toISOString() : v[3] });
+    rows.push({ Email: String(v[0]), Name: String(v[1] || ''),
+      Type: String(v[2] || '').toLowerCase() === 'cc' ? 'cc' : 'to',
+      AddedBy: String(v[3] || ''),
+      AddedAt: v[4] instanceof Date ? v[4].toISOString() : v[4] });
   });
-  rows.sort(function (a, b) { return a.Name.localeCompare(b.Name) || a.Email.localeCompare(b.Email); });
+  rows.sort(function (a, b) {
+    if (a.Type !== b.Type) return a.Type === 'to' ? -1 : 1;   // To ก่อน CC
+    return a.Name.localeCompare(b.Name) || a.Email.localeCompare(b.Email);
+  });
   return { success: true, rows: rows };
 }
 
@@ -1422,6 +1429,7 @@ function addEmailRecipient(params) {
   const email = String((params && params.email) || '').trim();
   if (!email || email.indexOf('@') === -1) throw new Error('valid email required');
   const name = String((params && params.name) || '').trim();
+  const type = String((params && params.type) || '').toLowerCase() === 'cc' ? 'cc' : 'to';
   const addedBy = String((params && params.addedBy) || '').trim();
 
   const sh = getEmailRecipientsSheet_();
@@ -1436,7 +1444,7 @@ function addEmailRecipient(params) {
         if (String(emails[i][0]).trim().toLowerCase() === email.toLowerCase()) { rowNum = i + 2; break; }
       }
     }
-    const row = [email, name, addedBy, new Date()];
+    const row = [email, name, type, addedBy, new Date()];
     if (rowNum === -1) sh.appendRow(row);
     else sh.getRange(rowNum, 1, 1, EMAILRECIPIENTS_HEADERS.length).setValues([row]);
     return { success: true, action: rowNum === -1 ? 'added' : 'updated' };
