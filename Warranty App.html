@@ -174,6 +174,10 @@ input,select,textarea{font-family:inherit;font-size:14px;}
 .log-tbl .lt-type{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;white-space:nowrap;}
 .lt-type-warranty{background:#fef3c7;color:#92400e;} .lt-type-export{background:#dbeafe;color:#1e40af;} .lt-type-other{background:#f3f4f6;color:#374151;}
 .log-tbl .lt-qty{font-weight:700;color:#101828;text-align:right;}
+.log-tbl .lt-actions{white-space:nowrap;text-align:center;}
+.lt-btn{border:1px solid var(--border);background:#fff;border-radius:7px;width:28px;height:28px;font-size:13px;cursor:pointer;margin:0 1px;transition:background .12s,border-color .12s;}
+.lt-btn.lt-edit:hover{background:#fff5f4;border-color:var(--red);}
+.lt-btn.lt-del:hover{background:#fee2e2;border-color:#ef4444;}
 /* companion-set editor */
 .cset-parts{display:flex;flex-direction:column;gap:6px;}
 .cset-part-row{display:flex;align-items:center;gap:8px;background:#f7f7f8;border-radius:8px;padding:6px 9px;font-size:13px;}
@@ -3720,17 +3724,13 @@ function selectPartSuggestion(idx, p){
 }
 
 /* When a still-codeless part is chosen from the ⏳ "รอเติมรหัส" suggestions, pull
-   the photo and machine context captured with it — so the item is filled in the
-   same way a real DB part would be, only the code is still missing. Machine
-   blanks are filled but never clobbered; the image is kept (not treated as a
-   replaceable DB image) so a later code lookup with no picture can't drop it. */
+   ONLY the photo captured with it — the machine/customer on a pending record is
+   just where it was first seen and shouldn't override the current order. The
+   image is kept (not treated as a replaceable DB image) so a later code lookup
+   with no picture can't drop it. */
 async function autofillFromPending(idx, pend){
   const it = order.items[idx];
   if(!it || it.locked || !pend) return;
-  if(!String(it.machineNo||'').trim() && pend.MachineNo) it.machineNo = String(pend.MachineNo);
-  if(!String(it.machineType||'').trim() && pend.MachineType) it.machineType = String(pend.MachineType);
-  if(!String(order.customer||'').trim() && pend.Customer){ order.customer = String(pend.Customer); bindTopFields(); }
-  renderItems();
   const raw = pend.ImageURL || '';
   if(!normalizeImageUrl(raw)) return;
   // don't overwrite a real user photo the row might already have
@@ -4054,7 +4054,7 @@ function renderUsageRows(rows){
 /* Full usage ledger as a scrollable table (used by the 📊 Log modal). Sticky
    header, zebra rows; scrolls sideways on narrow phones so every column stays
    readable. Summary stat pills sit above. */
-function renderUsageRowsFull(rows){
+function renderUsageRowsFull(rows, editable){
   if(!rows.length) return '<div class="db-empty">ไม่มีข้อมูล</div>';
   const totalQty = rows.reduce((s,r)=>{ const n = parseFloat(r.Qty); return s + (isNaN(n)?0:n); }, 0);
   const customers = new Set(rows.map(r=>r.Customer).filter(Boolean));
@@ -4068,6 +4068,9 @@ function renderUsageRowsFull(rows){
     const when = r.Timestamp ? new Date(r.Timestamp).toLocaleString('th-TH',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '-';
     const machine = [r.MachineType, r.MachineNo].filter(Boolean).join(' · ') || '-';
     const qty = [r.Qty, r.Unit].filter(v=>v!=='' && v!=null).join(' ') || '-';
+    const actions = editable
+      ? `<td class="lt-actions"><button type="button" class="lt-btn lt-edit" data-uid="${r._uid}" title="แก้ไข">✎</button><button type="button" class="lt-btn lt-del" data-uid="${r._uid}" title="ลบ">🗑</button></td>`
+      : '';
     return `<tr>
       <td class="lt-date">${escHtml(when)}</td>
       <td><span class="lt-type ${typeCls(r.Type)}">${escHtml(r.Type||'-')}</span></td>
@@ -4077,11 +4080,12 @@ function renderUsageRowsFull(rows){
       <td>${escHtml(machine)}</td>
       <td class="lt-qty">${escHtml(qty)}</td>
       <td>${escHtml(r.RecordedBy||'-')}</td>
+      ${actions}
     </tr>`;
   }).join('');
   return summary + `<div class="log-tbl-wrap"><div class="log-tbl-scroll"><table class="log-tbl">
     <thead><tr>
-      <th>วันที่</th><th>ประเภท</th><th>ลูกค้า</th><th>Article</th><th>ชื่ออะไหล่</th><th>เครื่อง</th><th>จำนวน</th><th>ผู้บันทึก</th>
+      <th>วันที่</th><th>ประเภท</th><th>ลูกค้า</th><th>Article</th><th>ชื่ออะไหล่</th><th>เครื่อง</th><th>จำนวน</th><th>ผู้บันทึก</th>${editable?'<th>จัดการ</th>':''}
     </tr></thead>
     <tbody>${body}</tbody>
   </table></div></div>`;
@@ -4200,14 +4204,46 @@ async function openLogModal(){
       (m.includes('Unknown action') ? ' → ต้อง Deploy Code.gs ใหม่' : '') + '</div>';
     return;
   }
+  allRows.forEach((r,i)=>{ r._uid = i; });     // stable handle for edit/delete lookups
   const uniq = f => [...new Set(allRows.map(r=>String(r[f]||'').trim()).filter(Boolean))].sort();
+  let _lastQuery = '';
   function renderFiltered(v){
-    const q = (v||'').trim().toLowerCase();
+    if(v !== undefined) _lastQuery = v;
+    const q = (_lastQuery||'').trim().toLowerCase();
     _filteredRows = !q ? allRows : allRows.filter(r=>{
       const hay = [r.Customer,r.ArticleNo,r.PartName,r.MachineType,r.MachineNo,r.Type,r.RecordedBy].join(' ').toLowerCase();
       return q.split(/\s+/).every(w=>hay.includes(w));
     });
-    bodyEl.innerHTML = renderUsageRowsFull(_filteredRows);
+    bodyEl.innerHTML = renderUsageRowsFull(_filteredRows, true);
+    wireLogRowActions();
+  }
+  const matchOf = r => ({ OrderId:r.OrderId, ArticleNo:r.ArticleNo, PartName:r.PartName });
+  function wireLogRowActions(){
+    bodyEl.querySelectorAll('.lt-del').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const r = allRows.find(x=>String(x._uid)===btn.dataset.uid);
+        if(!r) return;
+        if(!confirm(`ลบรายการนี้ออกจากประวัติ?\n\n${r.Customer||'-'} · #${r.ArticleNo||'-'} ${r.PartName||''}\n(ลบเฉพาะประวัติ ไม่กระทบ Data Base)`)) return;
+        btn.disabled = true;
+        try{
+          const res = await lookupApiCall('deletePartUsage', { row:r._row, match:matchOf(r) });
+          if(res && res.success===false) throw new Error(res.error||'ลบไม่สำเร็จ');
+          allRows = allRows.filter(x=>x!==r);
+          flashStatus('ลบรายการแล้ว');
+          renderFiltered();
+        }catch(err){
+          btn.disabled = false;
+          const m = String(err.message||err);
+          alert('ลบไม่สำเร็จ: '+m+(m.includes('Unknown action')?'\n→ ต้อง Deploy Code.gs ใหม่':''));
+        }
+      };
+    });
+    bodyEl.querySelectorAll('.lt-edit').forEach(btn=>{
+      btn.onclick = ()=>{
+        const r = allRows.find(x=>String(x._uid)===btn.dataset.uid);
+        if(r) openLogEditModal(r, ()=>renderFiltered());
+      };
+    });
   }
   // shared combobox: type to search, chips for quick picks, caret for grouped list
   const combo = buildFilterCombo({
@@ -4233,6 +4269,68 @@ async function openLogModal(){
       {key:'SetName',label:'ชุดเบิก',width:120},{key:'RecordedBy',label:'ผู้บันทึก',width:110},{key:'Note',label:'หมายเหตุ',width:180}
     ];
     downloadExcel(_filteredRows, cols, 'log-'+new Date().toISOString().slice(0,10), 'ประวัติการเบิกอะไหล่');
+  };
+}
+
+/* Edit one usage-history row (fix a typo, or clean up a test entry). Stacks on
+   top of the Log modal; on save it updates the sheet row (guarded by OrderId /
+   ArticleNo / PartName so a shifted row is never touched) and the local copy. */
+function openLogEditModal(r, onSaved){
+  const ov = document.createElement('div');
+  ov.className = 'edit-part-modal open';
+  const F = (label,key,val)=>`<label>${label}<input type="text" class="le-f" data-k="${key}" value="${escAttr(val==null?'':val)}"></label>`;
+  ov.innerHTML = `<div class="edit-part-dialog">
+    <div class="epm-head"><span>✎ แก้ไขรายการประวัติ</span><button type="button" class="epm-x">✕</button></div>
+    <div class="epm-body">
+      <div class="epm-note">แก้ไขข้อมูลประวัติการเบิกรายการนี้ (แก้เฉพาะประวัติ ไม่กระทบ Data Base)</div>
+      ${F('ประเภท','Type',r.Type)}
+      ${F('ลูกค้า','Customer',r.Customer)}
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;">${F('รุ่นเครื่อง','MachineType',r.MachineType)}</div>
+        <div style="flex:1;">${F('หมายเลขเครื่อง','MachineNo',r.MachineNo)}</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;">${F('Article No','ArticleNo',r.ArticleNo)}</div>
+        <div style="flex:2;">${F('ชื่ออะไหล่','PartName',r.PartName)}</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;">${F('จำนวน','Qty',r.Qty)}</div>
+        <div style="flex:1;">${F('หน่วย','Unit',r.Unit)}</div>
+      </div>
+      ${F('ชุดเบิก','SetName',r.SetName)}
+      ${F('ผู้บันทึก','RecordedBy',r.RecordedBy)}
+      ${F('หมายเหตุ','Note',r.Note)}
+    </div>
+    <div class="epm-actions">
+      <button type="button" class="btn le-cancel">ยกเลิก</button>
+      <button type="button" class="btn btn-primary le-save">บันทึก</button>
+    </div>
+  </div>`;
+  ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
+  ov.querySelector('.le-cancel').onclick = ()=>userDismissTopModal();
+  ov.addEventListener('click', e=>{ if(e.target===ov) userDismissTopModal(); });
+  document.body.appendChild(ov);
+  modalOpened();
+  ov.querySelector('.le-save').onclick = async ()=>{
+    const updates = {};
+    ov.querySelectorAll('.le-f').forEach(inp=>{ updates[inp.dataset.k] = inp.value; });
+    const btn = ov.querySelector('.le-save'); btn.disabled = true;
+    try{
+      const res = await lookupApiCall('updatePartUsage', {
+        row: r._row,
+        match: { OrderId:r.OrderId, ArticleNo:r.ArticleNo, PartName:r.PartName },
+        updates
+      });
+      if(res && res.success===false) throw new Error(res.error||'บันทึกไม่สำเร็จ');
+      Object.keys(updates).forEach(k=>{ r[k] = updates[k]; });   // reflect the edit locally
+      flashStatus('บันทึกการแก้ไขแล้ว');
+      userDismissTopModal();
+      if(onSaved) onSaved();
+    }catch(err){
+      btn.disabled = false;
+      const m = String(err.message||err);
+      alert('บันทึกไม่สำเร็จ: '+m+(m.includes('Unknown action')?'\n→ ต้อง Deploy Code.gs ใหม่':''));
+    }
   };
 }
 
