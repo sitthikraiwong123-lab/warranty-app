@@ -2627,18 +2627,18 @@ document.addEventListener('DOMContentLoaded', ()=>{
       sectionHtml = renderPendingTable(pending);
     } else if(dbActiveTab === 'machines'){
       const filtered = filterList(lookupCache.machines, 'machines', ['MachineNumber','CustomerName','MachineType']);
-      sectionHtml = `<div class=”db-add-bar”><button type=”button” class=”db-add-btn” id=”dbAddMachine”><span class=”ico”>＋</span> เพิ่มเครื่องใหม่</button></div>`
+      sectionHtml = `<div class=”db-add-bar”><button type=”button” class=”db-add-btn” id=”dbAddMachine”><span class=”ico”>＋</span> เพิ่มเครื่องใหม่</button><button type=”button” class=”db-add-btn db-export-btn” data-tab=”machines” style=”margin-left:8px;”>📥 Export</button></div>`
         + searchBox('machines')
         + `<p style=”font-size:12px;color:var(--gray);margin:0 0 10px;”>กด ✎ เพื่อแก้ไขเครื่องจักร · แสดง ${filtered.length}/${lookupCache.machines.length}</p>` + renderMachinesList(filtered);
     } else if(dbActiveTab === 'parts'){
       const filtered = filterList(lookupCache.parts, 'parts', ['ArticleNo','Description']);
-      sectionHtml = `<div class=”db-add-bar”><button type=”button” class=”db-add-btn” id=”dbAddPart”><span class=”ico”>＋</span> เพิ่มอะไหล่ใหม่</button></div>`
+      sectionHtml = `<div class=”db-add-bar”><button type=”button” class=”db-add-btn” id=”dbAddPart”><span class=”ico”>＋</span> เพิ่มอะไหล่ใหม่</button><button type=”button” class=”db-add-btn db-export-btn” data-tab=”parts” style=”margin-left:8px;”>📥 Export</button></div>`
         + searchBox('parts')
         + `<p style=”font-size:12px;color:var(--gray);margin:0 0 10px;”>แตะรูปเพื่อดูเต็ม · กด ✎ เพื่อแก้ไขอะไหล่ · แสดง ${filtered.length}/${lookupCache.parts.length}</p>` + renderPartsList(filtered);
     } else if(dbActiveTab === 'sets'){
       const allSets = lookupCache.companions||[];
       const filtered = filterList(allSets, 'sets', ['name']);
-      sectionHtml = searchBox('sets')
+      sectionHtml = `<div style=”display:flex;gap:8px;margin-bottom:10px;”><div style=”flex:1;”>${searchBox('sets')}</div><button type=”button” class=”db-add-btn db-export-btn” data-tab=”sets” style=”white-space:nowrap;height:38px;”>📥 Export</button></div>`
         + `<p style=”font-size:12px;color:var(--gray);margin:0 0 10px;”>ชุดพาร์ทที่ต้องเบิกด้วยกัน · ⭐ = พาร์ทหลัก · แสดง ${filtered.length}/${allSets.length}</p>` + renderCompanionSets(filtered);
     } else if(dbActiveTab === 'trash'){
       sectionHtml = `<p style=”font-size:12px;color:var(--gray);margin:0 0 10px;”>อะไหล่ที่ถูกลบ (สำรองไว้) · กด “กู้คืน” เพื่อนำกลับเข้าฐานข้อมูล</p>` + await renderRecycleBin();
@@ -2725,6 +2725,29 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(addSetBtn) addSetBtn.onclick = ()=>openCompanionSetEditor(null);
     body.querySelectorAll('.db-set-edit').forEach(btn=>{
       btn.onclick = ()=>{ const s=(lookupCache.companions||[]).find(x=>String(x.name||'')===btn.dataset.name); openCompanionSetEditor(s||null); };
+    });
+    body.querySelectorAll('.db-export-btn').forEach(btn=>{
+      btn.onclick = ()=>{
+        const tab = btn.dataset.tab;
+        if(tab==='machines'){
+          downloadCsv(lookupCache.machines,
+            [{key:'MachineNumber',label:'เลขเครื่อง'},{key:'MachineType',label:'รุ่นเครื่อง'},{key:'CustomerName',label:'ลูกค้า'}],
+            'machines-'+new Date().toISOString().slice(0,10));
+        } else if(tab==='parts'){
+          const cols = [{key:'ArticleNo',label:'Article No'},{key:'Description',label:'รายละเอียด'}];
+          const sample = lookupCache.parts[0]||{};
+          Object.keys(sample).filter(k=>/suggestion\s*word/i.test(k)).forEach((k,i)=>cols.push({key:k,label:'คำค้นหา '+(i+1)}));
+          if(sample.ImageURL!==undefined) cols.push({key:'ImageURL',label:'URL รูปภาพ'});
+          downloadCsv(lookupCache.parts, cols, 'parts-'+new Date().toISOString().slice(0,10));
+        } else if(tab==='sets'){
+          const sets = lookupCache.companions||[];
+          const maxParts = sets.reduce((m,s)=>Math.max(m,(s.parts||[]).length),0);
+          const cols = [{key:'name',label:'ชื่อชุด'},{key:'image',label:'URL รูปภาพ'}];
+          for(let i=0;i<maxParts;i++) cols.push({key:'_p'+i,label:i===0?'พาร์ทหลัก':'พาร์ท '+(i+1)});
+          const flat = sets.map(s=>{const o={name:s.name,image:s.image||''}; (s.parts||[]).forEach((p,i)=>{o['_p'+i]=p;}); return o;});
+          downloadCsv(flat, cols, 'sets-'+new Date().toISOString().slice(0,10));
+        }
+      };
     });
   }
 
@@ -3738,6 +3761,25 @@ function renderUsageRowsFull(rows){
     }).join('') + `</div>`;
 }
 
+function downloadCsv(rows, columns, filename){
+  if(!rows.length){ flashStatus('ไม่มีข้อมูลให้ Export'); return; }
+  const sep = ',';
+  const esc = v => {
+    const s = String(v==null?'':v).replace(/\r?\n/g,' ');
+    return s.indexOf(sep)>=0||s.indexOf('"')>=0 ? '"'+s.replace(/"/g,'""')+'"' : s;
+  };
+  const header = columns.map(c=>esc(c.label||c.key)).join(sep);
+  const body = rows.map(r=> columns.map(c=>esc(typeof c.fmt==='function'?c.fmt(r):r[c.key])).join(sep)).join('\r\n');
+  const csv = '﻿' + header + '\r\n' + body;
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = (filename||'export')+'.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+  flashStatus('Export เสร็จแล้ว ('+rows.length+' รายการ)');
+}
+
 /* "ประวัติการเบิก" for one Article No — which customer / machine did this part
    go to? Standalone (IIFE scope) so BOTH the item-row 👁 button and the part
    editor can open it. It mounts its own .edit-part-modal, so opening it on top
@@ -3782,7 +3824,7 @@ async function openLogModal(){
       <input type="text" class="log-search" placeholder="ค้นหา... (ชื่อพาร์ท, ลูกค้า, รุ่นเครื่อง, Article No)" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:10px;">
       <div class="log-body"><div class="db-empty">กำลังโหลด...</div></div>
     </div>
-    <div class="epm-actions"><button type="button" class="btn epm-close">ปิด</button></div>
+    <div class="epm-actions"><button type="button" class="btn btn-primary log-export">📥 Export Excel</button><button type="button" class="btn epm-close">ปิด</button></div>
   </div>`;
   ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
   ov.querySelector('.epm-close').onclick = ()=>userDismissTopModal();
@@ -3793,6 +3835,7 @@ async function openLogModal(){
   const bodyEl = ov.querySelector('.log-body');
   const searchInp = ov.querySelector('.log-search');
   let allRows = [];
+  let _filteredRows = [];
   try{
     const res = await lookupApiCall('getAllPartUsage', { limit: 500 });
     allRows = res.rows || [];
@@ -3804,14 +3847,23 @@ async function openLogModal(){
   }
   function renderFiltered(){
     const q = (searchInp.value||'').trim().toLowerCase();
-    const filtered = !q ? allRows : allRows.filter(r=>{
+    _filteredRows = !q ? allRows : allRows.filter(r=>{
       const hay = [r.Customer,r.ArticleNo,r.PartName,r.MachineType,r.MachineNo,r.Type,r.RecordedBy].join(' ').toLowerCase();
       return q.split(/\s+/).every(w=>hay.includes(w));
     });
-    bodyEl.innerHTML = renderUsageRowsFull(filtered);
+    bodyEl.innerHTML = renderUsageRowsFull(_filteredRows);
   }
   renderFiltered();
   searchInp.oninput = renderFiltered;
+  ov.querySelector('.log-export').onclick = ()=>{
+    const cols = [
+      {key:'Timestamp',label:'วันที่',fmt:r=>r.Timestamp?new Date(r.Timestamp).toLocaleString('th-TH'):''},{key:'Type',label:'ประเภท'},
+      {key:'Customer',label:'ลูกค้า'},{key:'MachineType',label:'รุ่นเครื่อง'},{key:'MachineNo',label:'เลขเครื่อง'},
+      {key:'ArticleNo',label:'Article No'},{key:'PartName',label:'ชื่ออะไหล่'},{key:'Qty',label:'จำนวน'},
+      {key:'Unit',label:'หน่วย'},{key:'SetName',label:'ชุดเบิก'},{key:'RecordedBy',label:'ผู้บันทึก'},{key:'Note',label:'หมายเหตุ'}
+    ];
+    downloadCsv(_filteredRows, cols, 'log-'+new Date().toISOString().slice(0,10));
+  };
 }
 
 /* ---------------- rich text: sanitizer + floating format toolbar ----------------
