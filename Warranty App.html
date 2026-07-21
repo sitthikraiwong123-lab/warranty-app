@@ -4494,8 +4494,12 @@ function downloadPdfPreview(){
 function commitPdfAction(){ recordOrderPartUsage(); commitExportNumberOnSend(); }
 
 function pdfSubject(){
-  return [(order.type||'Warranty'), 'Part Order', order.customer ? '- '+order.customer : '']
-    .filter(Boolean).join(' ').trim();
+  const type = order.type || 'Warranty';
+  // Running number ON → "{Type} PO#{TLyyyy-nnn}"; OFF → "{Type} Part Order".
+  // Use the same number the PDF shows (committed exportNo, else the preview no).
+  const no = runNumberEnabled() ? (order.exportNo || window._pdfDisplayNo || runNumberPreview()) : '';
+  const head = no ? (type + ' PO#' + no) : (type + ' Part Order');
+  return [head, order.customer ? '- ' + order.customer : ''].filter(Boolean).join(' ').trim();
 }
 /* ==================== ส่งออก: การแบ่งหน้าที่ ====================
    ✉ Send to email — ผู้รับมาจากสมุดรายชื่อ 👥 (To/CC ไม่พิมพ์ต่อออเดอร์) →
