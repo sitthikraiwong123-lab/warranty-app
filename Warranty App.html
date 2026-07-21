@@ -1334,6 +1334,22 @@ function sanitizeRichHtml(html){
   return tpl.innerHTML;
 }
 
+/* Flatten a sanitized rich-HTML fragment to a single inline line. A
+   contenteditable wraps every typed line in <div>…</div> (and Enter inserts
+   <br>), which force a line break in the PDF's Description cell even when there's
+   plenty of room. We turn those block breaks into spaces so the text flows and
+   wraps ONLY when it genuinely overflows the column width; inline styling
+   (bold / italic / underline / colour) is kept untouched. */
+function richInlineHtml(html){
+  return String(html==null?'':html)
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/(div|p)>\s*<(div|p)\b[^>]*>/gi, ' ')  // boundary between blocks → space
+    .replace(/<\/?(div|p)\b[^>]*>/gi, '')               // strip the remaining block wrappers
+    .replace(/ /g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 /* Dynamically inject @font-face for print template, reusing existing embedded font data
    (avoids duplicating the large base64 font blobs already present as window.SARABUN_*_B64) */
 let _sarabunFontFaceInjected = false;
@@ -1376,10 +1392,14 @@ function buildPrintHtml(ord){
     const pnameHtml = pnamePlain
       ? (it.descriptionHtml ? sanitizeRichHtml(it.descriptionHtml) : escHtml(pnamePlain))
       : '';
-    const descCombined = (pnameHtml ? [pnameHtml] : [])
-      .concat([qtyStr, unitStr].filter(Boolean).map(escHtml))
-      .concat(itemDescHtml ? [itemDescHtml] : [])
-      .join(' ');
+    // Flatten block breaks (contenteditable <div>/<br>) so the line only wraps
+    // when it actually overflows the 98mm column — not after the part name.
+    const descCombined = richInlineHtml(
+      (pnameHtml ? [pnameHtml] : [])
+        .concat([qtyStr, unitStr].filter(Boolean).map(escHtml))
+        .concat(itemDescHtml ? [itemDescHtml] : [])
+        .join(' ')
+    );
     itemRows.push(`<tr>
       <td class="pcol-mno">${escHtml(it.machineNo)}</td>
       <td class="pcol-mtype">${escHtml(it.machineType)}</td>
