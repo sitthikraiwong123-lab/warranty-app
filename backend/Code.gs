@@ -73,6 +73,7 @@ function handleRequest(e) {
       case 'deleteRecord':  result = deleteRecord(params); break;
       case 'deleteAlias':   result = deleteAlias(params); break;
       case 'uploadImage':   result = uploadImage(params); break;
+      case 'uploadPdf':     result = uploadPdf(params); break;
       case 'setImageURL':   result = setImageURL(params); break;
       case 'getImageBytes': result = getImageBytes(params); break;
       case 'repairImages':  result = repairImages(params); break;
@@ -91,6 +92,9 @@ function handleRequest(e) {
       case 'addPendingPart':     result = addPendingPart(params); break;
       case 'getPendingParts':    result = getPendingParts(params); break;
       case 'deletePendingPart':  result = deletePendingPart(params); break;
+      case 'getEmailRecipients':   result = getEmailRecipients(params); break;
+      case 'addEmailRecipient':    result = addEmailRecipient(params); break;
+      case 'deleteEmailRecipient': result = deleteEmailRecipient(params); break;
       case 'getAppSettings':     result = getAppSettings(); break;
       case 'setAppSettings':     result = setAppSettings(params); break;
       case 'reserveExportNumber':result = reserveExportNumber(params); break;
@@ -119,7 +123,9 @@ function defaultAppSettings_() {
   return {
     fmtToolbar: false,        // format toolbar (B/I/U/colour) — global on/off
     runNumberEnabled: false,  // running export number — global on/off
-    shareEmail: false,        // Email/Share buttons in preview — global on/off
+    paSend: false,            // Power Automate direct send — global on/off
+    paUrl: '',                // Power Automate HTTP trigger URL
+    hideSendEmail: false,     // hide the ✉ Send to email button app-wide
     runPrefix: 'TL',          // number prefix, e.g. TL2026-001
     runYear: (new Date()).getFullYear(),
     runNext: 1                // next sequence to hand out
@@ -152,12 +158,14 @@ function setAppSettings(params) {
   lock.waitLock(10000);
   try {
     const s = readAppSettings_();
-    ['fmtToolbar', 'runNumberEnabled', 'shareEmail', 'runPrefix', 'runYear', 'runNext'].forEach(function(k) {
+    ['fmtToolbar', 'runNumberEnabled', 'paSend', 'paUrl', 'hideSendEmail', 'runPrefix', 'runYear', 'runNext'].forEach(function(k) {
       if (patch[k] !== undefined) s[k] = patch[k];
     });
     s.fmtToolbar = !!s.fmtToolbar;
     s.runNumberEnabled = !!s.runNumberEnabled;
-    s.shareEmail = !!s.shareEmail;
+    s.paSend = !!s.paSend;
+    s.paUrl = String(s.paUrl || '').trim();
+    s.hideSendEmail = !!s.hideSendEmail;
     s.runPrefix = String(s.runPrefix || 'TL').trim().slice(0, 8) || 'TL';
     s.runYear = parseInt(s.runYear, 10) || (new Date()).getFullYear();
     s.runNext = Math.max(1, parseInt(s.runNext, 10) || 1);
@@ -555,6 +563,38 @@ function uploadImage(params) {
   // Use the thumbnail-friendly URL format that works reliably in <img> tags
   const url = 'https://lh3.googleusercontent.com/d/' + fileId;
   return { success: true, url: url, fileId: fileId, shared: shared };
+}
+
+// Uploads a base64 PDF to a dedicated Drive folder and returns a view link.
+// Used by the app's ✉ Send-to-email flow: mailto: cannot carry an attachment,
+// so the PDF rides the email as a Drive link instead.
+const PDF_FOLDER_NAME = 'WarrantyApp Sent PDFs';
+function getPdfFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const cached = props.getProperty('pdfFolderId');
+  if (cached) {
+    try { return DriveApp.getFolderById(cached); } catch (e) {}
+  }
+  const it = DriveApp.getFoldersByName(PDF_FOLDER_NAME);
+  const folder = it.hasNext() ? it.next() : DriveApp.createFolder(PDF_FOLDER_NAME);
+  props.setProperty('pdfFolderId', folder.getId());
+  return folder;
+}
+
+function uploadPdf(params) {
+  const base64 = params.base64;
+  if (!base64) throw new Error('base64 required');
+  let filename = String(params.filename || '').trim() || ('export_order_' + Date.now() + '.pdf');
+  if (!/\.pdf$/i.test(filename)) filename += '.pdf';
+  const blob = Utilities.newBlob(Utilities.base64Decode(base64), 'application/pdf', filename);
+  const file = getPdfFolder_().createFile(blob);
+  const shared = shareFileAnyone_(file);
+  return {
+    success: true,
+    url: 'https://drive.google.com/file/d/' + file.getId() + '/view',
+    fileId: file.getId(),
+    shared: shared
+  };
 }
 
 // Try anyone-with-link, then domain-with-link; never throws. Returns
@@ -1343,6 +1383,91 @@ function deletePendingPart(params) {
     const ids = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
     for (var i = ids.length - 1; i >= 0; i--) {
       if (String(ids[i][0]).trim() === id) { sh.deleteRow(i + 2); return { success: true, action: 'deleted' }; }
+    }
+    return { success: true, action: 'not_found' };
+  } finally { try { lock.releaseLock(); } catch (e) {} }
+}
+
+// ============================================================
+// EMAIL RECIPIENTS — saved To/Cc addresses for the Power Automate send flow
+// A small shared directory so the team doesn't retype the same addresses on
+// every order. Read is open to anyone (the send-review modal offers them as
+// autocomplete); add/delete is UI-gated to Power User in the frontend, same
+// trust model as the other global settings in this app.
+// ============================================================
+const EMAILRECIPIENTS_SHEET = 'EmailRecipients';
+// Type: 'to' | 'cc' — the send flow addresses every saved 'to' recipient and
+// copies every 'cc' one; there is no per-order picking in the app anymore.
+const EMAILRECIPIENTS_HEADERS = ['Email', 'Name', 'Type', 'AddedBy', 'AddedAt'];
+
+function getEmailRecipientsSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(EMAILRECIPIENTS_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(EMAILRECIPIENTS_SHEET);
+    sh.appendRow(EMAILRECIPIENTS_HEADERS);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function getEmailRecipients(params) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(EMAILRECIPIENTS_SHEET);
+  if (!sh || sh.getLastRow() < 2) return { success: true, rows: [] };
+  const values = sh.getRange(2, 1, sh.getLastRow() - 1, EMAILRECIPIENTS_HEADERS.length).getValues();
+  const rows = [];
+  values.forEach(function (v) {
+    if (!String(v[0]).trim()) return;
+    rows.push({ Email: String(v[0]), Name: String(v[1] || ''),
+      Type: String(v[2] || '').toLowerCase() === 'cc' ? 'cc' : 'to',
+      AddedBy: String(v[3] || ''),
+      AddedAt: v[4] instanceof Date ? v[4].toISOString() : v[4] });
+  });
+  rows.sort(function (a, b) {
+    if (a.Type !== b.Type) return a.Type === 'to' ? -1 : 1;   // To ก่อน CC
+    return a.Name.localeCompare(b.Name) || a.Email.localeCompare(b.Email);
+  });
+  return { success: true, rows: rows };
+}
+
+// Upserts by email (case-insensitive) so re-adding just updates the name.
+function addEmailRecipient(params) {
+  const email = String((params && params.email) || '').trim();
+  if (!email || email.indexOf('@') === -1) throw new Error('valid email required');
+  const name = String((params && params.name) || '').trim();
+  const type = String((params && params.type) || '').toLowerCase() === 'cc' ? 'cc' : 'to';
+  const addedBy = String((params && params.addedBy) || '').trim();
+
+  const sh = getEmailRecipientsSheet_();
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    const last = sh.getLastRow();
+    let rowNum = -1;
+    if (last > 1) {
+      const emails = sh.getRange(2, 1, last - 1, 1).getValues();
+      for (var i = 0; i < emails.length; i++) {
+        if (String(emails[i][0]).trim().toLowerCase() === email.toLowerCase()) { rowNum = i + 2; break; }
+      }
+    }
+    const row = [email, name, type, addedBy, new Date()];
+    if (rowNum === -1) sh.appendRow(row);
+    else sh.getRange(rowNum, 1, 1, EMAILRECIPIENTS_HEADERS.length).setValues([row]);
+    return { success: true, action: rowNum === -1 ? 'added' : 'updated' };
+  } finally { try { lock.releaseLock(); } catch (e) {} }
+}
+
+function deleteEmailRecipient(params) {
+  const email = String((params && params.email) || '').trim().toLowerCase();
+  if (!email) throw new Error('email required');
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(EMAILRECIPIENTS_SHEET);
+  if (!sh || sh.getLastRow() < 2) return { success: true, action: 'noop' };
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    const emails = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+    for (var i = emails.length - 1; i >= 0; i--) {
+      if (String(emails[i][0]).trim().toLowerCase() === email) { sh.deleteRow(i + 2); return { success: true, action: 'deleted' }; }
     }
     return { success: true, action: 'not_found' };
   } finally { try { lock.releaseLock(); } catch (e) {} }
