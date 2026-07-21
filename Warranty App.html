@@ -3699,6 +3699,7 @@ function renderPartSuggestions(ac, idx, query){
       order.items[idx]._pendingPartRef = pend;
       renderItems();
       flashField(`.f-description[data-idx="${idx}"]`);
+      autofillFromPending(idx, pend);   // pull the photo + machine context too
     };
   });
 }
@@ -3716,6 +3717,32 @@ function selectPartSuggestion(idx, p){
   flashField(`.f-description[data-idx="${idx}"]`);
   maybeAutofillDbImage(idx);
   maybeSuggestCompanions(idx);
+}
+
+/* When a still-codeless part is chosen from the ⏳ "รอเติมรหัส" suggestions, pull
+   the photo and machine context captured with it — so the item is filled in the
+   same way a real DB part would be, only the code is still missing. Machine
+   blanks are filled but never clobbered; the image is kept (not treated as a
+   replaceable DB image) so a later code lookup with no picture can't drop it. */
+async function autofillFromPending(idx, pend){
+  const it = order.items[idx];
+  if(!it || it.locked || !pend) return;
+  if(!String(it.machineNo||'').trim() && pend.MachineNo) it.machineNo = String(pend.MachineNo);
+  if(!String(it.machineType||'').trim() && pend.MachineType) it.machineType = String(pend.MachineType);
+  if(!String(order.customer||'').trim() && pend.Customer){ order.customer = String(pend.Customer); bindTopFields(); }
+  renderItems();
+  const raw = pend.ImageURL || '';
+  if(!normalizeImageUrl(raw)) return;
+  // don't overwrite a real user photo the row might already have
+  if(it.image && it.image.src && !it.image.fromDb && !it.image.fromPending) return;
+  const keyName = String(it.description||'');
+  const src = await resolveDbImageDataUrl(raw);
+  if(!src) return;
+  if(order.items[idx] !== it || String(it.description||'') !== keyName) return; // row changed while fetching
+  if(it.image && it.image.src && !it.image.fromDb && !it.image.fromPending) return;
+  it.image = { src, x:0, y:0, w:1, h:1, objX:50, objY:50, z:1, fromDb:false, fromPending:true };
+  renderItemPhoto(idx);
+  flashStatus('ดึงรูป + ข้อมูลจากคิวรอเติมรหัสให้อัตโนมัติ');
 }
 
 /* Called when a Machine No field loses focus: auto-fill Machine Type + Customer if known,
