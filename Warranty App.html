@@ -4667,19 +4667,53 @@ function openSendReviewModal(){
   const joinEmails = rows => rows.map(r => r.Email).join(';');
   if(paMode) loadEmailRecipients();   // warm the cache for the PA send
 
-  // Outlook compose deep link. To omitted → Outlook opens with To blank.
-  // The file line adapts to whether the upload produced a link.
+  // Two Outlook targets:
+  //   MOBILE → the Outlook APP itself, via its URI scheme. Android blocks a raw
+  //     ms-outlook:// navigation from a page, so it must go through an intent://
+  //     URL that names the package and carries a browser_fallback_url; iOS takes
+  //     the raw ms-outlook:// scheme, with a visibility check falling back to
+  //     Outlook web if the app isn't installed.
+  //   DESKTOP → Outlook web compose (outlook.office.com), opened in a reserved
+  //     tab (the popup-block-safe one-tap trick).
+  // A compose deep link (app or web) cannot carry a real attachment, so the PDF
+  // rides as a link in the body; 📤 Share is the true-attachment path.
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent)); // iPadOS masquerades as Mac
+  const isMobile = isAndroid || isIOS;
   let uploadedUrl = '';
-  const openOutlook = (win, subject, body)=>{
-    const fileLine = uploadedUrl
-      ? '\n\n📎 ไฟล์ PDF: ' + uploadedUrl
-      : '\n\n[แนบไฟล์ PDF ก่อนส่ง — กด ⬇ Save PDF ในแอปเพื่อดาวน์โหลดไฟล์]';
-    const url = 'https://outlook.office.com/mail/deeplink/compose?subject=' + encodeURIComponent(subject) +
-      '&body=' + encodeURIComponent(body + fileLine);
+  const enc = encodeURIComponent;
+  const composeBody = body => body + (uploadedUrl
+    ? '\n\n📎 ไฟล์ PDF: ' + uploadedUrl
+    : '\n\n[แนบไฟล์ PDF ก่อนส่ง — กด ⬇ Save PDF ในแอปเพื่อดาวน์โหลดไฟล์]');
+  const webComposeUrl = (subject, body)=>
+    'https://outlook.office.com/mail/deeplink/compose?subject=' + enc(subject) + '&body=' + enc(composeBody(body));
+  const openOutlookWeb = (win, subject, body)=>{
+    const url = webComposeUrl(subject, body);
     if(win && !win.closed){ win.location.href = url; return; }
     const a = document.createElement('a');
     a.href = url; a.target = '_blank'; a.rel = 'noopener';
     document.body.appendChild(a); a.click(); a.remove();
+  };
+  // Fire the Outlook APP on mobile; falls back to Outlook web if not installed.
+  const openOutlookApp = (subject, body)=>{
+    const b = composeBody(body);
+    if(isAndroid){
+      // intent:// → Outlook app if present, else Chrome follows the fallback URL.
+      window.location.href = 'intent://compose?subject=' + enc(subject) + '&body=' + enc(b) +
+        '#Intent;scheme=ms-outlook;package=com.microsoft.office.outlook;' +
+        'S.browser_fallback_url=' + enc(webComposeUrl(subject, body)) + ';end';
+      return;
+    }
+    // iOS: try the app scheme; if the page never backgrounds, open web instead.
+    let opened = false;
+    const onHide = ()=>{ if(document.visibilityState === 'hidden') opened = true; };
+    document.addEventListener('visibilitychange', onHide);
+    window.location.href = 'ms-outlook://compose?subject=' + enc(subject) + '&body=' + enc(b);
+    setTimeout(()=>{
+      document.removeEventListener('visibilitychange', onHide);
+      if(!opened) openOutlookWeb(null, subject, body);
+    }, 1800);
   };
 
   ov.querySelector('.srm-send').onclick = async ()=>{
@@ -4691,17 +4725,17 @@ function openSendReviewModal(){
     if(!_pdfBlob){ showErr('ไม่พบไฟล์ PDF — กลับไปกด 📄 เพื่อสร้างใหม่'); return; }
     if(paMode && !toList().length){ showErr('โหมด ⚡ ต้องมีผู้รับ (To) — เพิ่มที่ ☰ → 👥 จัดการอีเมลผู้รับ'); return; }
 
-    // Fallback second tap: upload already done but the window was popup-blocked.
-    if(uploadedUrl){
-      openOutlook(null, subject, body);
+    // Desktop second tap: upload done but the reserved tab was popup-blocked.
+    if(!paMode && !isMobile && uploadedUrl){
+      openOutlookWeb(null, subject, body);
       commitPdfAction();
       flashStatus('เปิด Outlook แล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่งใน Outlook', 7000);
       userDismissTopModal();
       return;
     }
-    // Reserve the Outlook window NOW, before any await, so it isn't blocked.
-    const win = paMode ? null : window.open('about:blank', '_blank');
-    btn.disabled = true; btn.textContent = paMode ? 'กำลังส่ง...' : 'กำลังเปิด Outlook...';
+    // Desktop reserves the web tab in-gesture; mobile navigates itself to the app.
+    const win = (!paMode && !isMobile) ? window.open('about:blank', '_blank') : null;
+    btn.disabled = true; btn.textContent = paMode ? 'กำลังส่ง...' : (isMobile ? 'กำลังเปิดแอป Outlook...' : 'กำลังเปิด Outlook...');
     try{
       if(paMode){
         const fileContentBase64 = await blobToBase64(_pdfBlob);
@@ -4721,7 +4755,7 @@ function openSendReviewModal(){
         return;
       }
       // Upload is BEST-EFFORT: a failure (offline, backend hiccup) must never
-      // stop the Outlook draft from opening — we just swap the file link for a
+      // stop Outlook from opening — we just swap the file link for a
       // "attach it yourself" note.
       let uploadErr = '';
       try{
@@ -4733,8 +4767,19 @@ function openSendReviewModal(){
         uploadedUrl = '';
         uploadErr = (upErr && upErr.message) ? upErr.message : String(upErr);
       }
+
+      if(isMobile){
+        // Navigate this window to the Outlook app (falls back to web internally).
+        commitPdfAction();
+        openOutlookApp(subject, body);
+        flashStatus(uploadedUrl
+          ? 'กำลังเปิดแอป Outlook — ลิงก์ไฟล์อยู่ในเนื้อหา (ถ้าไม่มีแอปจะเปิด Outlook เว็บ)'
+          : 'กำลังเปิดแอป Outlook — อัพโหลดไฟล์ไม่สำเร็จ (' + uploadErr + ') · แนบไฟล์เองด้วย ⬇ Save PDF', 8000);
+        userDismissTopModal();
+        return;
+      }
       if(win && !win.closed){
-        openOutlook(win, subject, body);
+        openOutlookWeb(win, subject, body);
         commitPdfAction();
         flashStatus(uploadedUrl
           ? 'เปิด Outlook แล้ว ✓ (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่ง'
