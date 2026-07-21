@@ -753,6 +753,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
       <div class="tm-label">ฐานข้อมูล</div>
       <!-- ฐานข้อมูล -->
       <button class="tm-item" id="btnViewDb" role="menuitem" title="ดูข้อมูล Database ที่ซิงค์มา"><span class="tm-ic">📋</span><span class="tm-txt">Data Base</span></button>
+      <button class="tm-item" id="btnViewLog" role="menuitem" title="ประวัติการเบิกอะไหล่ทั้งหมด"><span class="tm-ic">📊</span><span class="tm-txt">Log</span></button>
       <button class="tm-item" id="lookupSyncRefresh" role="menuitem" title="ซิงค์ฐานข้อมูล Machine/Part"><span class="tm-ic">⟳</span><span class="tm-txt">ซิงค์</span></button>
       <div class="tm-sep" role="separator"></div>
       <!-- ตั้งค่า -->
@@ -1843,6 +1844,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // Tabs: รออัพเดทเข้า DB | เครื่อง | อะไหล่ | ชุดเบิก | ถังขยะ
   // ============================================================
   let dbActiveTab = 'pending'; // pending | machines | parts | sets | trash
+  let _dbSearchQuery = { machines:'', parts:'', sets:'' };
   let _pendingPartsCache = [];  // last getPendingParts result (also read by the resolve/discard handlers)
 
   async function loadPendingParts(){
@@ -2609,19 +2611,37 @@ document.addEventListener('DOMContentLoaded', ()=>{
       ? `<div class="db-status-line err">⚠ ${escDb(lookupLastError)}</div>`
       : `<div class="db-status-line">ซิงค์ล่าสุด: ${lookupCache.syncedAt ? new Date(lookupCache.syncedAt).toLocaleString('th-TH') : '-'}</div>`;
 
+    const searchBox = (tab)=> `<input type=”text” class=”db-filter-input” data-tab=”${tab}” placeholder=”ค้นหา...” value=”${escAttr(_dbSearchQuery[tab]||'')}” style=”width:100%;box-sizing:border-box;padding:9px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:13px;margin-bottom:10px;”>`;
+
+    function filterList(list, tab, fields){
+      const q = (_dbSearchQuery[tab]||'').trim().toLowerCase();
+      if(!q) return list;
+      return list.filter(r=>{
+        const hay = fields.map(f=>String(r[f]||'')).join(' ').toLowerCase();
+        return q.split(/\s+/).every(w=>hay.includes(w));
+      });
+    }
+
     let sectionHtml = '';
     if(dbActiveTab === 'pending'){
       sectionHtml = renderPendingTable(pending);
     } else if(dbActiveTab === 'machines'){
-      sectionHtml = `<div class="db-add-bar"><button type="button" class="db-add-btn" id="dbAddMachine"><span class="ico">＋</span> เพิ่มเครื่องใหม่</button></div>`
-        + `<p style="font-size:12px;color:var(--gray);margin:0 0 10px;">กด ✎ เพื่อแก้ไขเครื่องจักร</p>` + renderMachinesList(lookupCache.machines);
+      const filtered = filterList(lookupCache.machines, 'machines', ['MachineNumber','CustomerName','MachineType']);
+      sectionHtml = `<div class=”db-add-bar”><button type=”button” class=”db-add-btn” id=”dbAddMachine”><span class=”ico”>＋</span> เพิ่มเครื่องใหม่</button></div>`
+        + searchBox('machines')
+        + `<p style=”font-size:12px;color:var(--gray);margin:0 0 10px;”>กด ✎ เพื่อแก้ไขเครื่องจักร · แสดง ${filtered.length}/${lookupCache.machines.length}</p>` + renderMachinesList(filtered);
     } else if(dbActiveTab === 'parts'){
-      sectionHtml = `<div class="db-add-bar"><button type="button" class="db-add-btn" id="dbAddPart"><span class="ico">＋</span> เพิ่มอะไหล่ใหม่</button></div>`
-        + `<p style="font-size:12px;color:var(--gray);margin:0 0 10px;">แตะรูปเพื่อดูเต็ม · กด ✎ เพื่อแก้ไขอะไหล่</p>` + renderPartsList(lookupCache.parts);
+      const filtered = filterList(lookupCache.parts, 'parts', ['ArticleNo','Description']);
+      sectionHtml = `<div class=”db-add-bar”><button type=”button” class=”db-add-btn” id=”dbAddPart”><span class=”ico”>＋</span> เพิ่มอะไหล่ใหม่</button></div>`
+        + searchBox('parts')
+        + `<p style=”font-size:12px;color:var(--gray);margin:0 0 10px;”>แตะรูปเพื่อดูเต็ม · กด ✎ เพื่อแก้ไขอะไหล่ · แสดง ${filtered.length}/${lookupCache.parts.length}</p>` + renderPartsList(filtered);
     } else if(dbActiveTab === 'sets'){
-      sectionHtml = `<p style="font-size:12px;color:var(--gray);margin:0 0 10px;">ชุดพาร์ทที่ต้องเบิกด้วยกัน · ⭐ = พาร์ทหลัก (ตัวกระตุ้น) · แตะรูปเพื่อดูเต็ม</p>` + renderCompanionSets(lookupCache.companions||[]);
+      const allSets = lookupCache.companions||[];
+      const filtered = filterList(allSets, 'sets', ['name']);
+      sectionHtml = searchBox('sets')
+        + `<p style=”font-size:12px;color:var(--gray);margin:0 0 10px;”>ชุดพาร์ทที่ต้องเบิกด้วยกัน · ⭐ = พาร์ทหลัก · แสดง ${filtered.length}/${allSets.length}</p>` + renderCompanionSets(filtered);
     } else if(dbActiveTab === 'trash'){
-      sectionHtml = `<p style="font-size:12px;color:var(--gray);margin:0 0 10px;">อะไหล่ที่ถูกลบ (สำรองไว้) · กด “กู้คืน” เพื่อนำกลับเข้าฐานข้อมูล</p>` + await renderRecycleBin();
+      sectionHtml = `<p style=”font-size:12px;color:var(--gray);margin:0 0 10px;”>อะไหล่ที่ถูกลบ (สำรองไว้) · กด “กู้คืน” เพื่อนำกลับเข้าฐานข้อมูล</p>` + await renderRecycleBin();
     }
 
     body.innerHTML = syncLine + renderDbTabs(pending) + `<div class="db-section-body">${sectionHtml}</div>`;
@@ -2629,6 +2649,15 @@ document.addEventListener('DOMContentLoaded', ()=>{
     // Tab switching
     body.querySelectorAll('.db-tab').forEach(btn=>{
       btn.onclick = async ()=>{ dbActiveTab = btn.dataset.tab; await renderDbModal(); };
+    });
+    // DB tab search/filter — re-render only section body, not the whole modal
+    body.querySelectorAll('.db-filter-input').forEach(inp=>{
+      let _t = null;
+      inp.oninput = ()=>{
+        clearTimeout(_t);
+        _t = setTimeout(()=>{ _dbSearchQuery[inp.dataset.tab] = inp.value; renderDbModal(); }, 250);
+      };
+      if(inp.value){ inp.focus(); try{ inp.setSelectionRange(inp.value.length, inp.value.length); }catch(e){} }
     });
     // Pending queue: fill in the code (→ Data Base) / discard
     body.querySelectorAll('.pend-resolve').forEach(btn=>{
@@ -3003,6 +3032,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
     document.getElementById('dbModal').classList.add('open');
     modalOpened();
   };
+  const btnViewLog = document.getElementById('btnViewLog');
+  if(btnViewLog) btnViewLog.onclick = ()=>openLogModal();
   const dbModalClose = document.getElementById('dbModalClose');
   if(dbModalClose) dbModalClose.onclick = ()=>userDismissTopModal();
   const dbModalEl = document.getElementById('dbModal');
@@ -3671,21 +3702,38 @@ function bindTopFields(){
    wherever it's shown (item-row 👁 button and the part editor). */
 function renderUsageRows(rows){
   if(!rows.length){
-    return '<div class="db-empty">ยังไม่มีประวัติการเบิก<br><span style="font-size:11px;">' +
+    return '<div class=”db-empty”>ยังไม่มีประวัติการเบิก<br><span style=”font-size:11px;”>' +
       'ระบบเริ่มเก็บตั้งแต่ตอนกด “✉ Export PDF → Email” (ไม่ได้เก็บย้อนหลังใบเก่า)</span></div>';
   }
+  const seen = new Set();
+  const unique = rows.filter(r=>{
+    const key = (r.Customer||'').toLowerCase() + '|' + (r.MachineType||'').toLowerCase();
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return `<div class=”epm-note”>ใช้กับ <b>${unique.length}</b> ลูกค้า/รุ่น (จาก ${rows.length} ครั้งที่เบิก)</div>` +
+    `<div class=”epm-restore-list”>` + unique.map(r=>{
+      return `<div class=”epm-restore-card”>
+        <div><b>${escHtml(r.Customer||'-')}</b></div>
+        <div>🖥 ${escHtml(r.MachineType||'-')}</div>
+      </div>`;
+    }).join('') + `</div>`;
+}
+function renderUsageRowsFull(rows){
+  if(!rows.length) return '<div class=”db-empty”>ไม่มีข้อมูล</div>';
   const totalQty = rows.reduce((s,r)=>{ const n = parseFloat(r.Qty); return s + (isNaN(n)?0:n); }, 0);
-  return `<div class="epm-note">เบิกไปแล้ว <b>${rows.length}</b> ครั้ง · รวม <b>${totalQty}</b> ชิ้น/ชุด</div>` +
-    `<div class="epm-restore-list">` + rows.map(r=>{
+  return `<div class=”epm-note”>ทั้งหมด <b>${rows.length}</b> รายการ · รวม <b>${totalQty}</b> ชิ้น/ชุด</div>` +
+    `<div class=”epm-restore-list”>` + rows.map(r=>{
       const when = r.Timestamp ? new Date(r.Timestamp).toLocaleString('th-TH') : '-';
       const machine = [r.MachineType, r.MachineNo].filter(Boolean).join(' · ') || '-';
       const qty = [r.Qty, r.Unit].filter(v=>v!=='' && v!=null).join(' ');
-      return `<div class="epm-restore-card">
-        <div class="rc-meta">${escHtml(when)} · ${escHtml(r.Type||'-')}${r.RecordedBy?' · '+escHtml(r.RecordedBy):''}</div>
-        <div><b>${escHtml(r.Customer||'-')}</b></div>
+      return `<div class=”epm-restore-card”>
+        <div class=”rc-meta”>${escHtml(when)} · ${escHtml(r.Type||'-')}${r.RecordedBy?' · '+escHtml(r.RecordedBy):''}</div>
+        <div><b>${escHtml(r.Customer||'-')}</b> · #${escHtml(r.ArticleNo||'-')} ${escHtml(r.PartName||'')}</div>
         <div>🖥 ${escHtml(machine)}</div>
         <div>จำนวน ${escHtml(qty||'-')}${r.SetName?' · ชุด: '+escHtml(r.SetName):''}</div>
-        ${r.Note?'<div style="color:var(--gray);">📝 '+escHtml(r.Note)+'</div>':''}
+        ${r.Note?'<div style=”color:var(--gray);”>📝 '+escHtml(r.Note)+'</div>':''}
       </div>`;
     }).join('') + `</div>`;
 }
@@ -3723,6 +3771,47 @@ async function openUsageModal(articleNo){
     return;
   }
   bodyEl.innerHTML = renderUsageRows(rows);
+}
+
+async function openLogModal(){
+  const ov = document.createElement('div');
+  ov.className = 'edit-part-modal open';
+  ov.innerHTML = `<div class="edit-part-dialog" style="max-width:600px;">
+    <div class="epm-head"><span>📊 ประวัติการเบิกทั้งหมด</span><button type="button" class="epm-x">✕</button></div>
+    <div class="epm-body">
+      <input type="text" class="log-search" placeholder="ค้นหา... (ชื่อพาร์ท, ลูกค้า, รุ่นเครื่อง, Article No)" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:14px;margin-bottom:10px;">
+      <div class="log-body"><div class="db-empty">กำลังโหลด...</div></div>
+    </div>
+    <div class="epm-actions"><button type="button" class="btn epm-close">ปิด</button></div>
+  </div>`;
+  ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
+  ov.querySelector('.epm-close').onclick = ()=>userDismissTopModal();
+  ov.addEventListener('click', e=>{ if(e.target===ov) userDismissTopModal(); });
+  document.body.appendChild(ov);
+  modalOpened();
+
+  const bodyEl = ov.querySelector('.log-body');
+  const searchInp = ov.querySelector('.log-search');
+  let allRows = [];
+  try{
+    const res = await lookupApiCall('getAllPartUsage', { limit: 500 });
+    allRows = res.rows || [];
+  }catch(err){
+    const m = String(err.message||err);
+    bodyEl.innerHTML = '<div class="db-status-line err">โหลดไม่สำเร็จ: ' + escHtml(m) +
+      (m.includes('Unknown action') ? ' → ต้อง Deploy Code.gs ใหม่' : '') + '</div>';
+    return;
+  }
+  function renderFiltered(){
+    const q = (searchInp.value||'').trim().toLowerCase();
+    const filtered = !q ? allRows : allRows.filter(r=>{
+      const hay = [r.Customer,r.ArticleNo,r.PartName,r.MachineType,r.MachineNo,r.Type,r.RecordedBy].join(' ').toLowerCase();
+      return q.split(/\s+/).every(w=>hay.includes(w));
+    });
+    bodyEl.innerHTML = renderUsageRowsFull(filtered);
+  }
+  renderFiltered();
+  searchInp.oninput = renderFiltered;
 }
 
 /* ---------------- rich text: sanitizer + floating format toolbar ----------------
