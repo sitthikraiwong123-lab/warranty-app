@@ -125,7 +125,7 @@ function defaultAppSettings_() {
     runNumberEnabled: false,  // running export number — global on/off
     paSend: false,            // Power Automate direct send — global on/off
     paUrl: '',                // Power Automate HTTP trigger URL
-    hideSendEmail: false,     // hide the ✉ Send to email button app-wide
+    hideSendEmail: true,      // hide the ✉ Send to email button app-wide (default HIDDEN — a Power User reveals it from the ⚡ page)
     runPrefix: 'TL',          // number prefix, e.g. TL2026-001
     runYear: (new Date()).getFullYear(),
     runNext: 1                // next sequence to hand out
