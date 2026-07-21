@@ -1102,25 +1102,38 @@ function softDeletePart(params) {
   const editor = String(params.editor || '').trim();
   if (!editor) return { success: false, error: 'ต้องลงชื่อผู้แก้ไขก่อน (editor required)' };
   const articleNo = String(params.articleNo || '').trim();
-  if (!articleNo) return { success: false, error: 'articleNo required' };
+  const description = String(params.description || '').trim();
+  if (!articleNo && !description) return { success: false, error: 'articleNo or description required' };
 
   const info = partsSheetInfo_();
-  const found = findPartRow_(info, articleNo);
-  if (!found) return { success: false, error: 'ไม่พบอะไหล่รหัส ' + articleNo };
+  var found = null;
+  if (articleNo) {
+    found = findPartRow_(info, articleNo);
+  } else {
+    var descLower = description.toLowerCase();
+    for (var r = 1; r < info.data.length; r++) {
+      if (String(info.data[r][info.articleNoCol] || '').trim()) continue;
+      if (String(info.data[r][info.descCol] || '').trim().toLowerCase() === descLower) {
+        var obj = {};
+        info.headers.forEach(function(h, i) { obj[String(h).trim()] = info.data[r][i]; });
+        found = { rowIndex0: r, obj: obj };
+        break;
+      }
+    }
+  }
+  if (!found) return { success: false, error: 'ไม่พบอะไหล่' + (articleNo ? ' รหัส ' + articleNo : ' ชื่อ ' + description) };
   const rowNum = found.rowIndex0 + 1;
   const oldData = found.obj;
+  var key = articleNo || description;
 
-  // 1) back up the full row into the RecycleBin tab BEFORE removing it
   getRecycleBinSheet_().appendRow([
     new Date(), editor, articleNo, String(oldData['Description'] || ''), JSON.stringify(oldData)
   ]);
-  // 2) leave an audit trail in the EditLog timeline as well
-  getEditLogSheet_().appendRow([new Date(), editor, 'delete', articleNo, '', JSON.stringify(oldData), '']);
-  // 3) remove from the live sheet + tombstone it (blocks a stale offline re-insert)
+  getEditLogSheet_().appendRow([new Date(), editor, 'delete', key, '', JSON.stringify(oldData), '']);
   info.sheet.deleteRow(rowNum);
-  recordTombstone('Part', articleNo);
+  recordTombstone('Part', key);
 
-  return { success: true, articleNo: articleNo };
+  return { success: true, articleNo: articleNo, description: description };
 }
 
 // List everything currently in the recycle bin, newest first.
