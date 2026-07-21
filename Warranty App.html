@@ -69,7 +69,11 @@ input,select,textarea{font-family:inherit;font-size:14px;}
 .pend-card{display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--border);
   border-left:3px solid #ef9f27;border-radius:0 9px 9px 0;padding:10px;}
 .pend-thumb{width:60px;height:60px;}
-.pend-thumb.noimg{display:flex;align-items:center;justify-content:center;font-size:22px;color:#bbb;cursor:default;}
+.pend-thumb.noimg{display:flex;align-items:center;justify-content:center;font-size:22px;color:#bbb;}
+.pend-thumb-wrap{position:relative;display:inline-block;flex-shrink:0;cursor:pointer;}
+.pend-thumb-wrap .pend-thumb{cursor:pointer;}
+.pend-thumb-wrap .pend-thumb.noimg{border:1.5px dashed #d8b06a;background:#fdf6e9;}
+.pend-thumb-cam{position:absolute;right:-4px;bottom:-4px;width:22px;height:22px;border-radius:50%;background:var(--red);color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.28);}
 .pend-main{flex:1;min-width:0;}
 .pend-name{font-weight:700;font-size:13.5px;color:var(--dark);word-break:break-word;}
 .pend-meta{font-size:11.5px;color:var(--gray);margin-top:2px;}
@@ -143,6 +147,12 @@ input,select,textarea{font-family:inherit;font-size:14px;}
 .cbx-opt:active,.cbx-opt.hi{background:#fef2f2;color:var(--red);}
 .cbx-opt .cbx-tag{font-size:10px;font-weight:700;color:#98a2b3;margin-left:auto;flex-shrink:0;}
 .cbx-group-label{position:sticky;top:0;background:#faf5f5;color:#b0454a;font-size:10.5px;font-weight:800;padding:6px 12px 4px;letter-spacing:.3px;}
+.cbx-cat{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 12px;font-size:14px;font-weight:600;border-radius:8px;cursor:pointer;color:var(--dark);transition:background .12s;}
+.cbx-cat:active{background:#fef2f2;color:var(--red);}
+.cbx-cat-count{font-size:12px;font-weight:700;color:#c0c4cc;flex-shrink:0;}
+.cbx-cat:active .cbx-cat-count{color:var(--red);}
+.cbx-back{position:sticky;top:0;background:#fff;border-bottom:1px solid #f0dede;color:var(--red);font-weight:700;font-size:12.5px;padding:9px 12px;cursor:pointer;margin-bottom:2px;}
+.cbx-back:active{background:#fef2f2;}
 .cbx-empty{padding:16px;text-align:center;color:#98a2b3;font-size:12.5px;}
 /* ---- Log summary stats + table ---- */
 .log-summary{display:flex;gap:10px;margin-bottom:12px;}
@@ -2502,9 +2512,13 @@ document.addEventListener('DOMContentLoaded', ()=>{
     }
     const cards = rows.map(r => {
       const img = normalizeImageUrl(r.ImageURL||'');
-      const thumb = img
-        ? `<img class="db-part-thumb pend-thumb" src="${escAttr(img)}" data-src="${escAttr(img)}" data-full="${escAttr(img)}" onerror="dbImgRetry(this)">`
+      // Thumbnail doubles as an image picker: tap to add (or replace) a photo so
+      // whoever requisitions this part next sees it. Wrapped in a <label> so the
+      // tap opens the hidden file input directly.
+      const inner = img
+        ? `<img class="db-part-thumb pend-thumb" src="${escAttr(img)}" data-src="${escAttr(img)}" onerror="dbImgRetry(this)">`
         : `<div class="db-part-thumb pend-thumb noimg">📷</div>`;
+      const thumb = `<label class="pend-thumb-wrap" title="แตะเพื่อ${img?'เปลี่ยน':'เพิ่ม'}รูป">${inner}<span class="pend-thumb-cam">📷</span><input type="file" accept="image/*" class="pend-img-input" data-id="${escAttr(r.PendingId)}" hidden></label>`;
       const machine = [r.MachineType, r.MachineNo].filter(Boolean).join(' · ') || '-';
       const when = r.CreatedAt ? new Date(r.CreatedAt).toLocaleDateString('th-TH') : '';
       return `<div class="pend-card">
@@ -2781,8 +2795,34 @@ document.addEventListener('DOMContentLoaded', ()=>{
     body.querySelectorAll('.pend-discard').forEach(btn=>{
       btn.onclick = ()=>discardPendingPart(btn.dataset.id);
     });
-    body.querySelectorAll('.pend-thumb[data-full]').forEach(el=>{
-      el.onclick = ()=>openImageLightbox(el.dataset.full);
+    // Pending queue: tap thumbnail → add / replace the part's photo. Re-saves the
+    // pending row with all its existing context plus the new image (upsert by
+    // name), so nothing is lost and the picture is ready for the next requisition.
+    body.querySelectorAll('.pend-img-input').forEach(inp=>{
+      inp.onchange = async (e)=>{
+        const f = e.target.files && e.target.files[0]; if(!f) return;
+        const row = (_pendingPartsCache||[]).find(r => String(r.PendingId) === inp.dataset.id);
+        if(!row) return;
+        try{
+          flashStatus('กำลังอัปโหลดรูป...');
+          const { base64 } = await compressForUpload(f);
+          const filename = 'pending_' + String(row.RequisitionName||'part').replace(/[^a-zA-Z0-9ก-๙]/g,'_').slice(0,40) + '.jpg';
+          const up = await lookupApiCall('uploadImage', { base64, mimeType:'image/jpeg', filename });
+          if(up && up.url){
+            await lookupApiCall('addPendingPart', {
+              requisitionName: row.RequisitionName, imageURL: up.url,
+              machineNo: row.MachineNo, machineType: row.MachineType,
+              customer: row.Customer, orderId: row.OrderId, recordedBy: row.RecordedBy
+            });
+            row.ImageURL = up.url;                    // keep cache in sync
+            flashStatus('เพิ่มรูปแล้ว ✓');
+            await renderDbModal();
+          }
+        }catch(err){
+          const m = String(err.message||err);
+          flashStatus('อัปโหลดไม่สำเร็จ: ' + m + (m.includes('Unknown action') ? ' → deploy Code.gs ใหม่' : ''));
+        }
+      };
     });
     // Parts/machines/sets list rows: thumbnail lightbox + ✎ edit (initial render)
     wireDbListItems(body);
@@ -3829,33 +3869,55 @@ function buildFilterCombo(opts){
     chipRow.appendChild(c);
   });
   if(!chipRow.children.length) chipRow.style.display = 'none';
-  // dropdown of every value (type-filtered), optionally grouped with labels
-  function addOpt(v){
+  // Dropdown. When grouped, it's a two-level drill-down: first pick a heading
+  // (รุ่นเครื่อง / หมายเลขเครื่อง / ลูกค้า ...), then it shows ONLY that
+  // heading's values to choose from. Typing in the field searches across every
+  // value at once (flat), each tagged with its heading.
+  let _drill = null; // index of the drilled-into group, or null = heading list
+  function addOpt(v, tag){
     const o = document.createElement('div'); o.className='cbx-opt'; o.textContent=v;
-    o.onmousedown = e=>{ e.preventDefault(); inp.value=v; wrap.classList.remove('open'); fire(); };
+    if(tag){ const t=document.createElement('span'); t.className='cbx-tag'; t.textContent=tag; o.appendChild(t); }
+    o.onmousedown = e=>{ e.preventDefault(); inp.value=v; wrap.classList.remove('open'); _drill=null; fire(); };
     menu.appendChild(o);
   }
   function renderMenu(){
     const q = inp.value.trim().toLowerCase();
     menu.textContent = '';
-    let shown = 0;
-    if(groups.length){
-      groups.forEach(g=>{
-        const matched = q ? g.values.filter(v=>v.toLowerCase().includes(q)) : g.values;
-        if(!matched.length) return;
-        const h = document.createElement('div'); h.className='cbx-group-label'; h.textContent=g.label; menu.appendChild(h);
-        matched.slice(0,40).forEach(v=>{ addOpt(v); shown++; });
-      });
-    } else {
-      const list = q ? values.filter(v=>v.toLowerCase().includes(q)) : values;
-      list.slice(0,80).forEach(v=>{ addOpt(v); shown++; });
+    // grouped + not searching → drill-down
+    if(groups.length && !q){
+      if(_drill == null){
+        groups.forEach((g,gi)=>{
+          const row = document.createElement('div'); row.className='cbx-cat';
+          const nm = document.createElement('span'); nm.textContent = g.label;
+          const ct = document.createElement('span'); ct.className='cbx-cat-count'; ct.textContent = g.values.length + ' ›';
+          row.append(nm, ct);
+          row.onmousedown = e=>{ e.preventDefault(); _drill = gi; renderMenu(); };
+          menu.appendChild(row);
+        });
+      } else {
+        const g = groups[_drill];
+        const back = document.createElement('div'); back.className='cbx-back'; back.textContent = '‹ ' + g.label;
+        back.onmousedown = e=>{ e.preventDefault(); _drill = null; renderMenu(); };
+        menu.appendChild(back);
+        if(!g.values.length){ const e=document.createElement('div'); e.className='cbx-empty'; e.textContent='ไม่มีข้อมูล'; menu.appendChild(e); }
+        g.values.forEach(v=>addOpt(v));
+      }
+      return;
     }
-    if(!shown){ const e=document.createElement('div'); e.className='cbx-empty'; e.textContent='ไม่พบข้อมูล'; menu.appendChild(e); }
+    // searching, or ungrouped → flat list
+    _drill = null;
+    const src = groups.length
+      ? groups.reduce((a,g)=>a.concat(g.values.map(v=>({v:v,tag:g.label}))),[])
+      : values.map(v=>({v:v}));
+    const list = q ? src.filter(o=>o.v.toLowerCase().includes(q)) : src;
+    list.slice(0,80).forEach(o=>addOpt(o.v, o.tag));
+    if(!list.length){ const e=document.createElement('div'); e.className='cbx-empty'; e.textContent='ไม่พบข้อมูล'; menu.appendChild(e); }
+    if(list.length>80){ const m=document.createElement('div'); m.className='cbx-empty'; m.textContent='…และอีก '+(list.length-80)+' รายการ (พิมพ์เพื่อค้นหา)'; menu.appendChild(m); }
   }
   let _t=null;
   inp.oninput = ()=>{ clearTimeout(_t); _t=setTimeout(fire, 220); clearBtn.classList.toggle('show', !!inp.value.trim()); if(wrap.classList.contains('open')) renderMenu(); };
-  caret.onclick = ()=>{ const open = !wrap.classList.contains('open'); wrap.classList.toggle('open', open); if(open){ renderMenu(); inp.focus(); } };
-  clearBtn.onclick = ()=>{ inp.value=''; wrap.classList.remove('open'); fire(); inp.focus(); };
+  caret.onclick = ()=>{ const open = !wrap.classList.contains('open'); wrap.classList.toggle('open', open); if(open){ _drill=null; renderMenu(); inp.focus(); } };
+  clearBtn.onclick = ()=>{ inp.value=''; wrap.classList.remove('open'); _drill=null; fire(); inp.focus(); };
   inp.onblur = ()=>{ setTimeout(()=>wrap.classList.remove('open'), 170); };
   if(inp.value.trim()) clearBtn.classList.add('show');
   wrap.getValue = ()=>inp.value;
