@@ -79,6 +79,7 @@ function handleRequest(e) {
       case 'repairImages':  result = repairImages(params); break;
       case 'deleteAlias':   result = deleteAlias(params); break;
       case 'updatePart':    result = updatePart(params); break;
+      case 'updateMachine': result = updateMachine(params); break;
       case 'getEditLog':    result = getEditLog(params); break;
       case 'restorePart':   result = restorePart(params); break;
       case 'softDeletePart':     result = softDeletePart(params); break;
@@ -1020,6 +1021,58 @@ function updatePart(params) {
     ? String(params.imageURL)
     : (imgHeader ? String(oldData[imgHeader] || '') : '');
   return { success: true, articleNo: newArticleNo, imageURL: finalImageURL };
+}
+
+function updateMachine(params) {
+  const editor = String(params.editor || '').trim();
+  if (!editor) return { success: false, error: 'editor required' };
+  const origMachineNo = String(params.origMachineNo || '').trim();
+  if (!origMachineNo) return { success: false, error: 'origMachineNo required' };
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.MACHINES);
+  if (!sheet) throw new Error('Sheet not found: ' + SHEETS.MACHINES);
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+
+  var machineNoCol = -1, customerCol = -1, typeCol = -1;
+  headers.forEach(function(h, i) {
+    var mapped = MACHINE_HEADER_MAP[String(h).trim()] || String(h).trim();
+    if (mapped === 'MachineNumber') machineNoCol = i;
+    else if (mapped === 'CustomerName') customerCol = i;
+    else if (mapped === 'MachineType') typeCol = i;
+  });
+  if (machineNoCol < 0) return { success: false, error: 'MachineNumber column not found' };
+
+  var foundRow = -1;
+  var origKey = origMachineNo.toLowerCase();
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][machineNoCol]).trim().toLowerCase() === origKey) { foundRow = r; break; }
+  }
+  if (foundRow < 0) return { success: false, error: 'ไม่พบเครื่อง ' + origMachineNo };
+
+  var newMachineNo = (params.newMachineNo !== undefined) ? String(params.newMachineNo).trim() : origMachineNo;
+  if (newMachineNo.toLowerCase() !== origKey) {
+    for (var r2 = 1; r2 < data.length; r2++) {
+      if (r2 !== foundRow && String(data[r2][machineNoCol]).trim().toLowerCase() === newMachineNo.toLowerCase()) {
+        return { success: false, error: 'เครื่อง ' + newMachineNo + ' มีอยู่แล้ว' };
+      }
+    }
+  }
+
+  getEditLogSheet_().appendRow([new Date(), editor, 'update-machine', origMachineNo, newMachineNo,
+    JSON.stringify({ MachineNumber: String(data[foundRow][machineNoCol]), CustomerName: customerCol >= 0 ? String(data[foundRow][customerCol]) : '', MachineType: typeCol >= 0 ? String(data[foundRow][typeCol]) : '' }),
+    JSON.stringify({ MachineNumber: newMachineNo, CustomerName: params.newCustomerName !== undefined ? String(params.newCustomerName) : undefined, MachineType: params.newMachineType !== undefined ? String(params.newMachineType) : undefined })
+  ]);
+
+  var rowNum = foundRow + 1;
+  if (params.newCustomerName !== undefined && customerCol >= 0) sheet.getRange(rowNum, customerCol + 1).setValue(String(params.newCustomerName));
+  if (params.newMachineType !== undefined && typeCol >= 0) sheet.getRange(rowNum, typeCol + 1).setValue(String(params.newMachineType));
+  if (newMachineNo.toLowerCase() !== origKey) sheet.getRange(rowNum, machineNoCol + 1).setValue(newMachineNo);
+
+  var lastModCol = findColIdx(headers, 'LastModified');
+  if (lastModCol !== -1) sheet.getRange(rowNum, lastModCol + 1).setValue(new Date());
+
+  return { success: true, machineNo: newMachineNo };
 }
 
 function getEditLog(params) {
