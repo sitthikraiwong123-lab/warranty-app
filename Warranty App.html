@@ -2553,31 +2553,32 @@ document.addEventListener('DOMContentLoaded', ()=>{
     ov.innerHTML = `<div class="edit-part-dialog">
       <div class="epm-head"><span>เติมรหัส → บันทึกเข้า Data Base</span><button type="button" class="epm-x">✕</button></div>
       <div class="epm-body">
-        <div class="epm-note">พาร์ทนี้ถูกเบิกไปแล้วแต่ยังไม่มีใน Data Base — ใส่ Article No ที่ถูกต้องเพื่อบันทึกเข้าระบบ</div>
+        <div class="epm-note">มี Article No แล้ว → กดบันทึกเข้า Data Base · ยังไม่มีก็กดบันทึกเก็บรูป/ชื่อไว้ในคิวรออัพเดทได้ (ใส่รหัสทีหลัง)</div>
         <div class="epm-signed">✅ ผู้แก้ไข: <span class="who">${escDb(editor||'-')}</span></div>
         <div class="pend-ctx">
-          ${img ? `<img class="epm-img-preview pend-ctx-img" src="${escAttr(img)}" data-src="${escAttr(img)}" data-full="${escAttr(img)}" onerror="dbImgRetry(this)">`
-                : `<div class="epm-img-preview noimg">📷</div>`}
+          <label class="rp-img-wrap pend-thumb-wrap" title="แตะเพื่อ${img?'เปลี่ยน':'เพิ่ม'}รูป">
+            <span class="rp-img-slot">${img ? `<img class="epm-img-preview" src="${escAttr(img)}" onerror="dbImgRetry(this)">` : `<div class="epm-img-preview noimg">📷</div>`}</span>
+            <span class="pend-thumb-cam">📷</span>
+            <input type="file" accept="image/*" class="rp-img-input" hidden>
+          </label>
           <div class="pend-ctx-lines">
             <div><b>ชื่อตอนเบิก:</b> ${escDb(reqName||'-')}</div>
             <div><b>ลูกค้า:</b> ${escDb(row.Customer||'-')}</div>
             <div><b>เครื่อง:</b> ${escDb(machine)}</div>
           </div>
         </div>
-        <label>Article No (รหัสที่ถูกต้อง) *<input type="text" class="rp-article" placeholder="เช่น 46694" autocomplete="off"></label>
+        <label>Article No (ใส่ทีหลังได้)<input type="text" class="rp-article" placeholder="เช่น 46694 · เว้นว่างได้" autocomplete="off"></label>
         <label>ชื่อพาร์ทที่จะบันทึก<input type="text" class="rp-name" value="${escAttr(reqName)}"></label>
         <div class="epm-note" style="margin-top:2px;">ชื่อตอนเบิก “${escDb(reqName)}” จะถูกเก็บเป็นคำค้นหาให้อัตโนมัติ</div>
       </div>
       <div class="epm-actions">
         <button type="button" class="btn rp-cancel">ยกเลิก</button>
-        <button type="button" class="btn btn-primary rp-save">บันทึกเข้า Data Base</button>
+        <button type="button" class="btn btn-primary rp-save">บันทึก</button>
       </div>
     </div>`;
     ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
     ov.querySelector('.rp-cancel').onclick = ()=>userDismissTopModal();
     ov.addEventListener('click', e=>{ if(e.target===ov) userDismissTopModal(); });
-    const ctxImg = ov.querySelector('.pend-ctx-img');
-    if(ctxImg) ctxImg.onclick = ()=>openImageLightbox(ctxImg.dataset.full);
     document.body.appendChild(ov);
     modalOpened();
 
@@ -2585,19 +2586,69 @@ document.addEventListener('DOMContentLoaded', ()=>{
     const nameInp = ov.querySelector('.rp-name');
     setTimeout(()=>artInp.focus(), 30);
 
+    // Image can be added / replaced right here — the 📷 preview is a file picker.
+    let imageUrl = String(row.ImageURL||'');
+    function renderImg(){
+      const slot = ov.querySelector('.rp-img-slot'); if(!slot) return;
+      const u = normalizeImageUrl(imageUrl||'');
+      slot.innerHTML = u
+        ? `<img class="epm-img-preview" src="${escAttr(u)}" onerror="dbImgRetry(this)">`
+        : `<div class="epm-img-preview noimg">📷</div>`;
+    }
+    ov.querySelector('.rp-img-input').onchange = async (e)=>{
+      const f = e.target.files && e.target.files[0]; if(!f) return;
+      try{
+        flashStatus('กำลังอัปโหลดรูป...');
+        const { base64 } = await compressForUpload(f);
+        const filename = 'pending_' + String(reqName||'part').replace(/[^a-zA-Z0-9ก-๙]/g,'_').slice(0,40) + '.jpg';
+        const up = await lookupApiCall('uploadImage', { base64, mimeType:'image/jpeg', filename });
+        if(up && up.url){ imageUrl = up.url; row.ImageURL = up.url; renderImg(); flashStatus('เพิ่มรูปแล้ว ✓'); }
+      }catch(err){
+        const m = String(err.message||err);
+        flashStatus('อัปโหลดไม่สำเร็จ: ' + m + (m.includes('Unknown action') ? ' → deploy Code.gs ใหม่' : ''));
+      }
+    };
+
     ov.querySelector('.rp-save').onclick = async ()=>{
       const articleNo = artInp.value.trim();
       const partName = nameInp.value.trim() || reqName;
-      if(!articleNo){ alert('กรุณาใส่ Article No'); artInp.focus(); return; }
+      const btn = ov.querySelector('.rp-save');
+
+      // No Article No yet → keep it in the pending queue, just save the (possibly
+      // new) image / name. Nothing is written to the Data Base until a code exists.
+      if(!articleNo){
+        btn.disabled = true;
+        try{
+          await lookupApiCall('addPendingPart', {
+            requisitionName: partName, imageURL: imageUrl,
+            machineNo: row.MachineNo, machineType: row.MachineType,
+            customer: row.Customer, orderId: row.OrderId, recordedBy: row.RecordedBy
+          });
+          // Renaming makes a new queue entry (keyed by name); drop the old one.
+          if(reqName && partName.toLowerCase() !== reqName.toLowerCase()){
+            await lookupApiCall('deletePendingPart', { pendingId: row.PendingId });
+          }
+          flashStatus('บันทึกไว้ในคิวรออัพเดทแล้ว (ยังไม่มีรหัส)');
+          userDismissTopModal();
+          try{ const res = await lookupApiCall('getPendingParts', {}); _pendingPartsCache = (res && res.rows) || _pendingPartsCache; }catch(e){}
+          await renderDbModal();
+        }catch(err){
+          btn.disabled = false;
+          const m = String(err.message||err);
+          alert('บันทึกไม่สำเร็จ: ' + m + (m.indexOf('Unknown action')>=0 ? '\n→ ต้อง Deploy Code.gs ใหม่' : ''));
+        }
+        return;
+      }
+
       // The code may already exist — then this was just an unrecognised NAME for
       // a part we already have, so attach the name rather than duplicate the part.
       const dup = lookupCache.parts.find(p => String(p.ArticleNo).trim().toLowerCase() === articleNo.toLowerCase());
       if(dup && !confirm(`รหัส #${articleNo} มีอยู่แล้วใน Data Base:\n“${dup.Description||'-'}”\n\nจะไม่สร้างพาร์ทซ้ำ แต่จะเพิ่ม “${reqName}” เป็นคำค้นหาให้พาร์ทนี้แทน — ใช่หรือไม่?`)) return;
-      const btn = ov.querySelector('.rp-save'); btn.disabled = true;
+      btn.disabled = true;
       try{
         if(!dup){
           await lookupQueueOrSend('recordNew', {type:'Part', data:{
-            ArticleNo: articleNo, Description: partName, ImageURL: String(row.ImageURL||'')
+            ArticleNo: articleNo, Description: partName, ImageURL: String(imageUrl||'')
           }});
         }
         if(reqName && reqName.toLowerCase() !== partName.toLowerCase()){
