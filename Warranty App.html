@@ -4661,12 +4661,26 @@ function downloadPdfPreview(){
 function commitPdfAction(){ recordOrderPartUsage(); commitExportNumberOnSend(); }
 
 function pdfSubject(){
+  // Format: "{Type} PO#{TLyyyy-nnn} {Part Name} for {Customer} #{Machine No}"
+  //   e.g.  "Warranty PO#TL2026-254 Main air line drain valve for WUS-TH #17384"
+  // Head's PO#{no} shows only when running number is on (else "{Type} Part Order");
+  // the tail describes the order's first meaningful item. NB the UI "Part Name"
+  // field is stored in item.description (item.itemDesc is the UI "Description").
   const type = order.type || 'Warranty';
-  // Running number ON → "{Type} PO#{TLyyyy-nnn}"; OFF → "{Type} Part Order".
-  // Use the same number the PDF shows (committed exportNo, else the preview no).
   const no = runNumberEnabled() ? (order.exportNo || window._pdfDisplayNo || runNumberPreview()) : '';
   const head = no ? (type + ' PO#' + no) : (type + ' Part Order');
-  return [head, order.customer ? '- ' + order.customer : ''].filter(Boolean).join(' ').trim();
+
+  const items = order.items || [];
+  const it = items.find(x => (x.description||'').trim() || (x.machineNo||'').trim()) || items[0] || {};
+  const partName = String(it.description || '').trim();
+  const machineNo = String(it.machineNo || '').trim();
+  const customer = String(order.customer || '').trim();
+
+  let tail = partName;
+  if(customer)  tail += (tail ? ' ' : '') + 'for ' + customer;
+  if(machineNo) tail += (tail ? ' ' : '') + '#' + machineNo;
+
+  return [head, tail].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 }
 /* ==================== ส่งออก: การแบ่งหน้าที่ ====================
    ✉ Send to email — ผู้รับมาจากสมุดรายชื่อ 👥 (To/CC ไม่พิมพ์ต่อออเดอร์) →
