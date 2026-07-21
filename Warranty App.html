@@ -1848,6 +1848,25 @@ document.addEventListener('DOMContentLoaded', ()=>{
     const editor = await ensureSignedIn();
     if(editor) openResolvePending(row, editor);
   };
+  window._autoResolvePending = async (pendingRow, articleNo, partName)=>{
+    const editor = await ensureSignedIn();
+    if(!editor) return;
+    const reqName = String(pendingRow.RequisitionName||'').trim();
+    const desc = partName || reqName;
+    const dup = lookupCache.parts.find(p => String(p.ArticleNo).trim().toLowerCase() === articleNo.toLowerCase());
+    if(!dup){
+      await lookupQueueOrSend('recordNew', {type:'Part', data:{
+        ArticleNo: articleNo, Description: desc, ImageURL: String(pendingRow.ImageURL||'')
+      }});
+    }
+    if(reqName && reqName.toLowerCase() !== desc.toLowerCase()){
+      await lookupQueueOrSend('recordNew', {type:'Part', data:{ ArticleNo: articleNo, Description: reqName }});
+    }
+    try{ await lookupApiCall('deletePendingPart', { pendingId: pendingRow.PendingId }); }catch(e){}
+    _pendingPartsCache = (_pendingPartsCache||[]).filter(r => String(r.PendingId) !== String(pendingRow.PendingId));
+    flashStatus('อัพเดทเข้า DB แล้ว: #' + articleNo);
+    lookupSync();
+  };
 
   function escDb(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
@@ -3328,7 +3347,12 @@ function renderPartSuggestions(ac, idx, query){
     el.onmousedown = ev=>{
       ev.preventDefault();
       ac.classList.remove('show');
-      if(window._openResolvePending) window._openResolvePending(pendingMatches[i]);
+      const pend = pendingMatches[i];
+      order.items[idx].description = String(pend.RequisitionName||'');
+      order.items[idx].descriptionHtml = '';
+      order.items[idx]._pendingPartRef = pend;
+      renderItems();
+      flashField(`.f-description[data-idx="${idx}"]`);
     };
   });
 }
@@ -3412,18 +3436,19 @@ function onArticleNoEntered(idx, articleNo){
       order.items[idx].descriptionHtml = '';
       renderItems();
       if(canonical) flashField(`.f-description[data-idx="${idx}"]`);
-      return;
-    }
-    if(canonical && currentDesc.toLowerCase() !== canonical.toLowerCase()){
-      recordPartAliasIfNew(articleNo, currentDesc); // save what was typed as an alias, if it's genuinely new
-      order.items[idx].description = canonical;     // then switch the field to the real name
+    } else if(canonical && currentDesc.toLowerCase() !== canonical.toLowerCase()){
+      recordPartAliasIfNew(articleNo, currentDesc);
+      order.items[idx].description = canonical;
       order.items[idx].descriptionHtml = '';
       renderItems();
       flashField(`.f-description[data-idx="${idx}"]`);
-      return;
     }
   }
-  // New parts are detected and recorded at Save/Export time (not on blur)
+  const pendRef = order.items[idx]._pendingPartRef;
+  if(pendRef && window._autoResolvePending){
+    delete order.items[idx]._pendingPartRef;
+    window._autoResolvePending(pendRef, articleNo, currentDesc);
+  }
   renderAliasAddRow(idx);
 }
 
