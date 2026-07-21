@@ -1836,6 +1836,19 @@ document.addEventListener('DOMContentLoaded', ()=>{
   let dbActiveTab = 'pending'; // pending | machines | parts | sets | trash
   let _pendingPartsCache = [];  // last getPendingParts result (also read by the resolve/discard handlers)
 
+  async function loadPendingParts(){
+    try{
+      const res = await lookupApiCall('getPendingParts', {});
+      if(res && res.rows) _pendingPartsCache = res.rows;
+    }catch(e){}
+  }
+  window._loadPendingParts = loadPendingParts;
+  window._getPendingPartsCache = ()=> _pendingPartsCache;
+  window._openResolvePending = async (row)=>{
+    const editor = await ensureSignedIn();
+    if(editor) openResolvePending(row, editor);
+  };
+
   function escDb(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
   function renderDbTabs(pending){
@@ -2742,11 +2755,14 @@ document.addEventListener('DOMContentLoaded', ()=>{
     async function doDelete(){
       editor = (editor||'').trim();
       if(!editor){ alert('กรุณาลงชื่อผู้แก้ไขก่อน'); return; }
-      if(!confirm(`ต้องการลบอะไหล่ #${origArticleNo} ?\n\nระบบจะย้ายไปที่ถังขยะ (สำรองข้อมูลเดิมไว้) และกู้คืนได้ภายหลัง`)) return;
+      const label = origArticleNo ? `#${origArticleNo}` : `"${descVal}"`;
+      if(!confirm(`ต้องการลบอะไหล่ ${label} ?\n\nระบบจะย้ายไปที่ถังขยะ (สำรองข้อมูลเดิมไว้) และกู้คืนได้ภายหลัง`)) return;
       const btn = ov.querySelector('.epm-delete'); if(btn) btn.disabled=true;
       try{
-        await lookupApiCall('softDeletePart', { articleNo: origArticleNo, editor });
-        const i = lookupCache.parts.findIndex(p => String(p.ArticleNo).trim().toLowerCase() === origArticleNo.trim().toLowerCase());
+        await lookupApiCall('softDeletePart', { articleNo: origArticleNo, description: descVal, editor });
+        const i = origArticleNo
+          ? lookupCache.parts.findIndex(p => String(p.ArticleNo).trim().toLowerCase() === origArticleNo.trim().toLowerCase())
+          : lookupCache.parts.findIndex(p => !String(p.ArticleNo||'').trim() && String(p.Description||'').trim().toLowerCase() === descVal.trim().toLowerCase());
         if(i >= 0) lookupCache.parts.splice(i, 1);
         lookupCache.cacheVersion = LOOKUP_CACHE_VERSION; await lkvSet('cache', lookupCache);
         flashStatus('ย้ายอะไหล่ไปถังขยะแล้ว · กู้คืนได้ในแท็บ “ถังขยะ”');
@@ -2895,6 +2911,7 @@ async function lookupSync(){
     lookupCache.cacheVersion = LOOKUP_CACHE_VERSION; await lkvSet("cache", lookupCache);
     lookupLastError = null;
     setLookupSyncUI('อัปเดตล่าสุด ' + new Date(lookupCache.syncedAt).toLocaleTimeString('th-TH') + ' · เครื่อง ' + lookupCache.machines.length + ' / อะไหล่ ' + lookupCache.parts.length, 'ok');
+    if(window._loadPendingParts) window._loadPendingParts();
   }catch(err){
     lookupLastError = err.message;
     setLookupSyncUI('ซิงค์ไม่สำเร็จ: ' + err.message, 'err');
@@ -3266,8 +3283,13 @@ function findMatchedAliasText(record, query){
 }
 function renderPartSuggestions(ac, idx, query){
   const results = searchAnyField(lookupCache.parts, query, 8);
-  if(!results.length){ ac.classList.remove('show'); ac.innerHTML=''; return; }
-  ac.innerHTML = results.map((p,i) => {
+  const q = (query||'').trim().toLowerCase();
+  const pendingMatches = !q ? [] : (window._getPendingPartsCache ? window._getPendingPartsCache() : []).filter(r=>{
+    const name = String(r.RequisitionName||'').toLowerCase();
+    return q.split(/\s+/).every(w => name.includes(w));
+  }).slice(0, 4);
+  if(!results.length && !pendingMatches.length){ ac.classList.remove('show'); ac.innerHTML=''; return; }
+  const dbHtml = results.map((p,i) => {
     const aliasMatch = findMatchedAliasText(p, query);
     const mainText = aliasMatch || p.Description || '-';
     const subText = aliasMatch
@@ -3284,9 +3306,30 @@ function renderPartSuggestions(ac, idx, query){
       </div>
     </div>`;
   }).join('');
+  const pendHtml = pendingMatches.map((r,i) => {
+    const imgUrl = normalizeImageUrl(r.ImageURL||'');
+    const imgTag = imgUrl
+      ? `<img src="${escAttr(imgUrl)}" onerror="this.style.display='none'">`
+      : '';
+    const machine = [r.MachineType, r.MachineNo].filter(Boolean).join(' · ');
+    return `<div class="ac-item ac-pending" data-pi="${i}">
+      <div class="ac-item-img">
+        ${imgTag}
+        <div><div class="ac-main">${escAttr(r.RequisitionName||'-')}</div><div class="ac-sub" style="color:#d97706;">⏳ รอเติมรหัส${machine ? ' · '+escAttr(machine) : ''}</div></div>
+      </div>
+    </div>`;
+  }).join('');
+  ac.innerHTML = dbHtml + (pendHtml ? (dbHtml ? '<div style="border-top:1px solid #e5e7eb;margin:2px 0;"></div>' : '') + pendHtml : '');
   ac.classList.add('show');
-  ac.querySelectorAll('.ac-item').forEach((el,i)=>{
+  ac.querySelectorAll('.ac-item:not(.ac-pending)').forEach((el,i)=>{
     el.onmousedown = ev=>{ ev.preventDefault(); selectPartSuggestion(idx, results[i]); ac.classList.remove('show'); };
+  });
+  ac.querySelectorAll('.ac-pending').forEach((el,i)=>{
+    el.onmousedown = ev=>{
+      ev.preventDefault();
+      ac.classList.remove('show');
+      if(window._openResolvePending) window._openResolvePending(pendingMatches[i]);
+    };
   });
 }
 function selectPartSuggestion(idx, p){
@@ -3434,7 +3477,7 @@ function flashField(selector){
     lookupCache.companions = stored.companions || [];
     lookupCache.syncedAt = stored.syncedAt || 0;
   }
-  if(lookupOnline) { lookupSync(); lookupFlushOutbox(); }
+  if(lookupOnline) { lookupSync(); lookupFlushOutbox(); if(window._loadPendingParts) window._loadPendingParts(); }
 })();
 
 /* ---------------- state ---------------- */
