@@ -123,6 +123,9 @@ function defaultAppSettings_() {
   return {
     fmtToolbar: false,        // format toolbar (B/I/U/colour) — global on/off
     runNumberEnabled: false,  // running export number — global on/off
+    paSend: false,            // Power Automate direct send — global on/off
+    paUrl: '',                // Power Automate HTTP trigger URL
+    hideSendEmail: false,     // hide the ✉ Send to email button app-wide
     runPrefix: 'TL',          // number prefix, e.g. TL2026-001
     runYear: (new Date()).getFullYear(),
     runNext: 1                // next sequence to hand out
@@ -155,11 +158,14 @@ function setAppSettings(params) {
   lock.waitLock(10000);
   try {
     const s = readAppSettings_();
-    ['fmtToolbar', 'runNumberEnabled', 'runPrefix', 'runYear', 'runNext'].forEach(function(k) {
+    ['fmtToolbar', 'runNumberEnabled', 'paSend', 'paUrl', 'hideSendEmail', 'runPrefix', 'runYear', 'runNext'].forEach(function(k) {
       if (patch[k] !== undefined) s[k] = patch[k];
     });
     s.fmtToolbar = !!s.fmtToolbar;
     s.runNumberEnabled = !!s.runNumberEnabled;
+    s.paSend = !!s.paSend;
+    s.paUrl = String(s.paUrl || '').trim();
+    s.hideSendEmail = !!s.hideSendEmail;
     s.runPrefix = String(s.runPrefix || 'TL').trim().slice(0, 8) || 'TL';
     s.runYear = parseInt(s.runYear, 10) || (new Date()).getFullYear();
     s.runNext = Math.max(1, parseInt(s.runNext, 10) || 1);
