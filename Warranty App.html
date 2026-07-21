@@ -142,6 +142,7 @@ input,select,textarea{font-family:inherit;font-size:14px;}
 .cbx-opt{padding:10px 12px;font-size:13.5px;border-radius:8px;cursor:pointer;color:var(--dark);display:flex;align-items:center;gap:8px;transition:background .12s;}
 .cbx-opt:active,.cbx-opt.hi{background:#fef2f2;color:var(--red);}
 .cbx-opt .cbx-tag{font-size:10px;font-weight:700;color:#98a2b3;margin-left:auto;flex-shrink:0;}
+.cbx-group-label{position:sticky;top:0;background:#faf5f5;color:#b0454a;font-size:10.5px;font-weight:800;padding:6px 12px 4px;letter-spacing:.3px;}
 .cbx-empty{padding:16px;text-align:center;color:#98a2b3;font-size:12.5px;}
 /* ---- Log summary stats + table ---- */
 .log-summary{display:flex;gap:10px;margin-bottom:12px;}
@@ -2673,11 +2674,18 @@ document.addEventListener('DOMContentLoaded', ()=>{
     // per-tab filter config, used to mount a shared combobox + partial refresh
     const FILTER_CFG = {
       machines: { data:()=>lookupCache.machines, fields:['MachineNumber','CustomerName','MachineType'],
-        values:()=>uniqueVals(lookupCache.machines,'CustomerName').concat(uniqueVals(lookupCache.machines,'MachineType')),
-        chips:()=>uniqueVals(lookupCache.machines,'CustomerName'),
-        placeholder:'ค้นหาเครื่อง... (เลข, ลูกค้า, รุ่น)', render:renderMachinesList },
+        groups:()=>[
+          { label:'รุ่นเครื่อง', values:uniqueVals(lookupCache.machines,'MachineType') },
+          { label:'หมายเลขเครื่อง', values:uniqueVals(lookupCache.machines,'MachineNumber') },
+          { label:'ลูกค้า', values:uniqueVals(lookupCache.machines,'CustomerName') },
+        ],
+        chips:()=>uniqueVals(lookupCache.machines,'MachineType'),
+        placeholder:'ค้นหาเครื่อง... (หมายเลข, รุ่น, ลูกค้า)', render:renderMachinesList },
       parts: { data:()=>lookupCache.parts, fields:['ArticleNo','Description'],
-        values:()=>uniqueVals(lookupCache.parts,'Description'),
+        groups:()=>[
+          { label:'ชื่ออะไหล่', values:uniqueVals(lookupCache.parts,'Description') },
+          { label:'Article No', values:uniqueVals(lookupCache.parts,'ArticleNo') },
+        ],
         chips:()=>uniqueVals(lookupCache.parts,'Description'),
         placeholder:'ค้นหาอะไหล่... (Article No, ชื่อ)', render:renderPartsList },
       sets: { data:()=>lookupCache.companions||[], fields:['name'],
@@ -2747,7 +2755,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
       const countEl = body.querySelector('.db-count');
       const combo = buildFilterCombo({
         placeholder: cfg.placeholder,
-        values: cfg.values(),
+        groups: cfg.groups ? cfg.groups() : null,
+        values: cfg.values ? cfg.values() : null,
         chips: cfg.chips(),
         initial: _dbSearchQuery[tab] || '',
         onChange: (v)=>{
@@ -2808,23 +2817,28 @@ document.addEventListener('DOMContentLoaded', ()=>{
     body.querySelectorAll('.db-export-btn').forEach(btn=>{
       btn.onclick = ()=>{
         const tab = btn.dataset.tab;
+        const stamp = new Date().toISOString().slice(0,10);
+        // Export honours the current filter — export exactly what's on screen.
+        const q = (_dbSearchQuery[tab]||'').trim();
         if(tab==='machines'){
-          downloadCsv(lookupCache.machines,
-            [{key:'MachineNumber',label:'เลขเครื่อง'},{key:'MachineType',label:'รุ่นเครื่อง'},{key:'CustomerName',label:'ลูกค้า'}],
-            'machines-'+new Date().toISOString().slice(0,10));
+          const data = filterList(lookupCache.machines, 'machines', FILTER_CFG.machines.fields);
+          downloadExcel(data,
+            [{key:'MachineNumber',label:'หมายเลขเครื่อง',width:130},{key:'MachineType',label:'รุ่นเครื่อง',width:150},{key:'CustomerName',label:'ลูกค้า',width:150}],
+            'machines-'+stamp, 'รายการเครื่องจักร'+(q?' ('+q+')':''));
         } else if(tab==='parts'){
-          const cols = [{key:'ArticleNo',label:'Article No'},{key:'Description',label:'รายละเอียด'}];
+          const data = filterList(lookupCache.parts, 'parts', FILTER_CFG.parts.fields);
+          const cols = [{key:'ArticleNo',label:'Article No',width:100},{key:'Description',label:'รายละเอียด',width:240}];
           const sample = lookupCache.parts[0]||{};
-          Object.keys(sample).filter(k=>/suggestion\s*word/i.test(k)).forEach((k,i)=>cols.push({key:k,label:'คำค้นหา '+(i+1)}));
-          if(sample.ImageURL!==undefined) cols.push({key:'ImageURL',label:'URL รูปภาพ'});
-          downloadCsv(lookupCache.parts, cols, 'parts-'+new Date().toISOString().slice(0,10));
+          Object.keys(sample).filter(k=>/suggestion\s*word/i.test(k)).forEach((k,i)=>cols.push({key:k,label:'คำค้นหา '+(i+1),width:130}));
+          if(sample.ImageURL!==undefined) cols.push({key:'ImageURL',label:'URL รูปภาพ',width:220});
+          downloadExcel(data, cols, 'parts-'+stamp, 'รายการอะไหล่'+(q?' ('+q+')':''));
         } else if(tab==='sets'){
-          const sets = lookupCache.companions||[];
+          const sets = filterList(lookupCache.companions||[], 'sets', FILTER_CFG.sets.fields);
           const maxParts = sets.reduce((m,s)=>Math.max(m,(s.parts||[]).length),0);
-          const cols = [{key:'name',label:'ชื่อชุด'},{key:'image',label:'URL รูปภาพ'}];
-          for(let i=0;i<maxParts;i++) cols.push({key:'_p'+i,label:i===0?'พาร์ทหลัก':'พาร์ท '+(i+1)});
+          const cols = [{key:'name',label:'ชื่อชุด',width:180},{key:'image',label:'URL รูปภาพ',width:220}];
+          for(let i=0;i<maxParts;i++) cols.push({key:'_p'+i,label:i===0?'พาร์ทหลัก':'พาร์ท '+(i+1),width:110});
           const flat = sets.map(s=>{const o={name:s.name,image:s.image||''}; (s.parts||[]).forEach((p,i)=>{o['_p'+i]=p;}); return o;});
-          downloadCsv(flat, cols, 'sets-'+new Date().toISOString().slice(0,10));
+          downloadExcel(flat, cols, 'sets-'+stamp, 'รายการชุดเบิก'+(q?' ('+q+')':''));
         }
       };
     });
@@ -3782,7 +3796,10 @@ function buildComboBox(baseOptions, value, onChange, placeholder){
    dynamic values) so it can't be broken by quoting. */
 function buildFilterCombo(opts){
   opts = opts || {};
-  const values = (opts.values || []).map(v=>String(v));
+  // Either a flat `values` list, or labelled `groups` [{label, values:[]}] that
+  // render as sections in the dropdown (e.g. หมายเลขเครื่อง / รุ่นเครื่อง / ลูกค้า).
+  const groups = (opts.groups || []).map(g=>({ label:String(g.label||''), values:(g.values||[]).map(v=>String(v)) })).filter(g=>g.values.length);
+  const values = groups.length ? groups.reduce((a,g)=>a.concat(g.values),[]) : (opts.values || []).map(v=>String(v));
   const chips  = (opts.chips  || values).map(v=>String(v));
   const wrap = document.createElement('div');
   wrap.className = 'cbx';
@@ -3812,18 +3829,28 @@ function buildFilterCombo(opts){
     chipRow.appendChild(c);
   });
   if(!chipRow.children.length) chipRow.style.display = 'none';
-  // dropdown of every value (type-filtered)
+  // dropdown of every value (type-filtered), optionally grouped with labels
+  function addOpt(v){
+    const o = document.createElement('div'); o.className='cbx-opt'; o.textContent=v;
+    o.onmousedown = e=>{ e.preventDefault(); inp.value=v; wrap.classList.remove('open'); fire(); };
+    menu.appendChild(o);
+  }
   function renderMenu(){
     const q = inp.value.trim().toLowerCase();
-    const list = q ? values.filter(v=>v.toLowerCase().includes(q)) : values;
     menu.textContent = '';
-    if(!list.length){ const e=document.createElement('div'); e.className='cbx-empty'; e.textContent='ไม่พบข้อมูล'; menu.appendChild(e); return; }
-    list.slice(0,80).forEach(v=>{
-      const o = document.createElement('div'); o.className='cbx-opt'; o.textContent=v;
-      o.onmousedown = e=>{ e.preventDefault(); inp.value=v; wrap.classList.remove('open'); fire(); };
-      menu.appendChild(o);
-    });
-    if(list.length>80){ const m=document.createElement('div'); m.className='cbx-empty'; m.textContent='…และอีก '+(list.length-80)+' รายการ (พิมพ์เพื่อค้นหา)'; menu.appendChild(m); }
+    let shown = 0;
+    if(groups.length){
+      groups.forEach(g=>{
+        const matched = q ? g.values.filter(v=>v.toLowerCase().includes(q)) : g.values;
+        if(!matched.length) return;
+        const h = document.createElement('div'); h.className='cbx-group-label'; h.textContent=g.label; menu.appendChild(h);
+        matched.slice(0,40).forEach(v=>{ addOpt(v); shown++; });
+      });
+    } else {
+      const list = q ? values.filter(v=>v.toLowerCase().includes(q)) : values;
+      list.slice(0,80).forEach(v=>{ addOpt(v); shown++; });
+    }
+    if(!shown){ const e=document.createElement('div'); e.className='cbx-empty'; e.textContent='ไม่พบข้อมูล'; menu.appendChild(e); }
   }
   let _t=null;
   inp.oninput = ()=>{ clearTimeout(_t); _t=setTimeout(fire, 220); clearBtn.classList.toggle('show', !!inp.value.trim()); if(wrap.classList.contains('open')) renderMenu(); };
@@ -3920,20 +3947,46 @@ function renderUsageRowsFull(rows){
   </table></div></div>`;
 }
 
-function downloadCsv(rows, columns, filename){
+/* Export a formatted Excel file. Builds a styled HTML table that Excel/Sheets
+   opens as a real worksheet — bold red header, banded rows, borders, a title
+   and an export-stamp — so the download looks tidy with zero libraries. Saved
+   as .xls with the MS-Excel MIME type. columns: [{key,label,fmt?,align?,width?}]. */
+function downloadExcel(rows, columns, filename, title){
   if(!rows.length){ flashStatus('ไม่มีข้อมูลให้ Export'); return; }
-  const sep = ',';
-  const esc = v => {
-    const s = String(v==null?'':v).replace(/\r?\n/g,' ');
-    return s.indexOf(sep)>=0||s.indexOf('"')>=0 ? '"'+s.replace(/"/g,'""')+'"' : s;
-  };
-  const header = columns.map(c=>esc(c.label||c.key)).join(sep);
-  const body = rows.map(r=> columns.map(c=>esc(typeof c.fmt==='function'?c.fmt(r):r[c.key])).join(sep)).join('\r\n');
-  const csv = '﻿' + header + '\r\n' + body;
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const esc = v => String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const ncol = columns.length;
+  const thBase = 'background:#E41D15;color:#ffffff;font-weight:bold;border:1px solid #b71812;padding:7px 10px;text-align:left;mso-number-format:\\@;';
+  const th = columns.map(c=>{
+    const w = c.width ? 'width:'+c.width+'px;' : '';
+    return `<th style="${thBase}${w}">${esc(c.label||c.key)}</th>`;
+  }).join('');
+  const body = rows.map((r,i)=>{
+    const bg = i%2 ? 'background:#fdeceb;' : 'background:#ffffff;';
+    const tds = columns.map(c=>{
+      const val = typeof c.fmt==='function' ? c.fmt(r) : r[c.key];
+      const align = c.align ? 'text-align:'+c.align+';' : '';
+      return `<td style="border:1px solid #e2c9c8;padding:5px 10px;vertical-align:top;mso-number-format:\\@;${bg}${align}">${esc(val)}</td>`;
+    }).join('');
+    return '<tr>'+tds+'</tr>';
+  }).join('');
+  const titleRow = title
+    ? `<tr><td colspan="${ncol}" style="font-size:15pt;font-weight:bold;color:#E41D15;padding:6px 10px;">${esc(title)}</td></tr>` : '';
+  const stamp = `<tr><td colspan="${ncol}" style="font-size:9pt;color:#8a8a8a;padding:2px 10px;">ส่งออกเมื่อ ${esc(new Date().toLocaleString('th-TH'))} · รวม ${rows.length} รายการ</td></tr>`;
+  const sheetName = esc((title||filename||'Sheet').slice(0,28));
+  const html = '﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">'
+    + '<head><meta charset="UTF-8">'
+    + '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>'
+    + '<x:Name>'+sheetName+'</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>'
+    + '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->'
+    + '<style>table{border-collapse:collapse;font-family:Calibri,Tahoma,sans-serif;font-size:11pt;}</style></head>'
+    + '<body><table border="0" cellspacing="0" cellpadding="0">'
+    + titleRow + stamp + '<tr><td></td></tr>'
+    + '<thead><tr>'+th+'</tr></thead><tbody>'+body+'</tbody>'
+    + '</table></body></html>';
+  const blob = new Blob([html], {type:'application/vnd.ms-excel;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = (filename||'export')+'.csv';
+  a.href = url; a.download = (filename||'export')+'.xls';
   document.body.appendChild(a); a.click();
   setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
   flashStatus('Export เสร็จแล้ว ('+rows.length+' รายการ)');
@@ -3944,13 +3997,15 @@ function downloadCsv(rows, columns, filename){
    editor can open it. It mounts its own .edit-part-modal, so opening it on top
    of the edit form is safe: closeTopmostModalDom() dismisses the topmost one
    first, leaving the edit form (and any unsaved photo) untouched underneath. */
-async function openUsageModal(articleNo){
+async function openUsageModal(articleNo, partName){
   const art = String(articleNo||'').trim();
-  if(!art){ flashStatus('ใส่ Article No ก่อน จึงจะดูประวัติการเบิกได้'); return; }
+  const name = String(partName||'').trim();
+  if(!art && !name){ flashStatus('ใส่รหัสหรือชื่ออะไหล่ก่อน จึงจะดูประวัติการเบิกได้'); return; }
+  const heading = art ? '#'+escHtml(art) : escHtml(name);
   const ov = document.createElement('div');
   ov.className = 'edit-part-modal open';
   ov.innerHTML = `<div class="edit-part-dialog">
-    <div class="epm-head"><span>ประวัติการเบิก #${escHtml(art)}</span><button type="button" class="epm-x">✕</button></div>
+    <div class="epm-head"><span>ประวัติการเบิก ${heading}</span><button type="button" class="epm-x">✕</button></div>
     <div class="epm-body"><div class="db-empty">กำลังโหลด...</div></div>
     <div class="epm-actions"><button type="button" class="btn epm-close">ปิด</button></div>
   </div>`;
@@ -3963,7 +4018,8 @@ async function openUsageModal(articleNo){
   const bodyEl = ov.querySelector('.epm-body');
   let rows = [];
   try{
-    const res = await lookupApiCall('getPartUsage', { articleNo: art, limit: 100 });
+    const q = art ? { articleNo: art, limit: 100 } : { name: name, limit: 100 };
+    const res = await lookupApiCall('getPartUsage', q);
     rows = res.rows || [];
   }catch(err){
     const m = String(err.message||err);
@@ -4013,10 +4069,15 @@ async function openLogModal(){
     });
     bodyEl.innerHTML = renderUsageRowsFull(_filteredRows);
   }
-  // shared combobox: type to search, chips for quick customer pick, caret for full list
+  // shared combobox: type to search, chips for quick picks, caret for grouped list
   const combo = buildFilterCombo({
     placeholder: 'ค้นหา... (ชื่อพาร์ท, ลูกค้า, รุ่น, Article No)',
-    values: uniq('Customer').concat(uniq('MachineType')),
+    groups: [
+      { label:'ลูกค้า', values: uniq('Customer') },
+      { label:'รุ่นเครื่อง', values: uniq('MachineType') },
+      { label:'หมายเลขเครื่อง', values: uniq('MachineNo') },
+      { label:'ประเภท', values: uniq('Type') },
+    ],
     chips: uniq('Type').concat(uniq('Customer')),
     onChange: renderFiltered
   });
@@ -4024,12 +4085,14 @@ async function openLogModal(){
   renderFiltered('');
   ov.querySelector('.log-export').onclick = ()=>{
     const cols = [
-      {key:'Timestamp',label:'วันที่',fmt:r=>r.Timestamp?new Date(r.Timestamp).toLocaleString('th-TH'):''},{key:'Type',label:'ประเภท'},
-      {key:'Customer',label:'ลูกค้า'},{key:'MachineType',label:'รุ่นเครื่อง'},{key:'MachineNo',label:'เลขเครื่อง'},
-      {key:'ArticleNo',label:'Article No'},{key:'PartName',label:'ชื่ออะไหล่'},{key:'Qty',label:'จำนวน'},
-      {key:'Unit',label:'หน่วย'},{key:'SetName',label:'ชุดเบิก'},{key:'RecordedBy',label:'ผู้บันทึก'},{key:'Note',label:'หมายเหตุ'}
+      {key:'Timestamp',label:'วันที่',width:135,fmt:r=>r.Timestamp?new Date(r.Timestamp).toLocaleString('th-TH'):''},
+      {key:'Type',label:'ประเภท',width:80},
+      {key:'Customer',label:'ลูกค้า',width:130},{key:'MachineType',label:'รุ่นเครื่อง',width:140},{key:'MachineNo',label:'หมายเลขเครื่อง',width:120},
+      {key:'ArticleNo',label:'Article No',width:90},{key:'PartName',label:'ชื่ออะไหล่',width:200},
+      {key:'Qty',label:'จำนวน',width:60,align:'right'},{key:'Unit',label:'หน่วย',width:60},
+      {key:'SetName',label:'ชุดเบิก',width:120},{key:'RecordedBy',label:'ผู้บันทึก',width:110},{key:'Note',label:'หมายเหตุ',width:180}
     ];
-    downloadCsv(_filteredRows, cols, 'log-'+new Date().toISOString().slice(0,10));
+    downloadExcel(_filteredRows, cols, 'log-'+new Date().toISOString().slice(0,10), 'ประวัติการเบิกอะไหล่');
   };
 }
 
@@ -4277,7 +4340,7 @@ function renderItems(){
   // no autocomplete, just mirror the value into the data model.
   list.querySelectorAll('.f-usage').forEach(el=>{
     const idx = +el.dataset.idx;
-    el.onclick = ()=>{ const it = order.items[idx]; openUsageModal(it && it.articleNo); };
+    el.onclick = ()=>{ const it = order.items[idx]; openUsageModal(it && it.articleNo, it && it.description); };
   });
   list.querySelectorAll('.f-qty').forEach(el=>{
     const idx = +el.dataset.idx;
@@ -4854,10 +4917,13 @@ function resetPdfPreview(){
    replaces its rows instead of duplicating them. Locked companion rows are
    included: they were requisitioned too. */
 async function recordOrderPartUsage(){
+  // Include still-codeless parts (name but no Article No): they were
+  // requisitioned too, and recording "used here" is what lets us trace them
+  // later — the backend keys those rows by part name.
   const items = (order.items||[])
-    .filter(it => it && String(it.articleNo||'').trim())
+    .filter(it => it && (String(it.articleNo||'').trim() || String(it.description||'').trim()))
     .map(it => ({
-      articleNo: String(it.articleNo).trim(),
+      articleNo: String(it.articleNo||'').trim(),
       partName: String(it.description||''),
       machineNo: String(it.machineNo||''),
       machineType: String(it.machineType||''),

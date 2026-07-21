@@ -1315,11 +1315,15 @@ function recordPartUsage(params) {
     const rows = [];
     items.forEach(function (it) {
       const art = String((it && it.articleNo) || '').trim();
-      if (!art) return; // a part with no code isn't traceable — skip
+      const name = String((it && it.partName) || '').trim();
+      // Record coded parts by code AND still-codeless parts by name — a part
+      // that only has a name was requisitioned too, and its "used here" history
+      // is exactly what identifies it later. Skip only rows with neither.
+      if (!art && !name) return;
       rows.push([
         now, orderId, type, customer,
         String(it.machineNo || ''), String(it.machineType || ''),
-        art, String(it.partName || ''),
+        art, name,
         it.qty === '' || it.qty == null ? '' : it.qty,
         String(it.unit || ''), String(it.note || ''), String(it.setName || ''),
         recordedBy
@@ -1335,10 +1339,13 @@ function recordPartUsage(params) {
 }
 
 // Usage history for ONE part (newest first). Queried on demand so the whole
-// ledger never has to be synced to the client.
+// ledger never has to be synced to the client. Look up by articleNo (coded
+// parts, col G) OR by name (still-codeless parts, matched on PartName col H) —
+// so a part that was requisitioned before it had a code still shows its history.
 function getPartUsage(params) {
   const articleNo = String((params && params.articleNo) || '').trim().toLowerCase();
-  if (!articleNo) throw new Error('articleNo required');
+  const name = String((params && params.name) || '').trim().toLowerCase();
+  if (!articleNo && !name) throw new Error('articleNo or name required');
   const limit = Number((params && params.limit) || 200);
 
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTUSAGE_SHEET);
@@ -1348,7 +1355,10 @@ function getPartUsage(params) {
   const out = [];
   for (var i = values.length - 1; i >= 0 && out.length < limit; i--) {
     const v = values[i];
-    if (String(v[6]).trim().toLowerCase() !== articleNo) continue; // col G = ArticleNo
+    var match = articleNo
+      ? String(v[6]).trim().toLowerCase() === articleNo      // col G = ArticleNo
+      : String(v[7]).trim().toLowerCase() === name;          // col H = PartName
+    if (!match) continue;
     const o = {};
     PARTUSAGE_HEADERS.forEach(function (h, c) { o[h] = v[c] instanceof Date ? v[c].toISOString() : v[c]; });
     out.push(o);
