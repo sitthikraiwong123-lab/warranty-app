@@ -585,20 +585,26 @@ html[lang="en"] .photo-canvas:empty::after{content:'Tap to add photo';} /* CSS-g
 #emailDraftText{width:100%;min-height:160px;box-sizing:border-box;border:1px solid var(--border);
   border-radius:8px;padding:10px;font-size:13px;line-height:1.5;font-family:inherit;resize:vertical;color:#222;}
 /* The actions live under the preview: decide what to do AFTER seeing the PDF.
-   Save PDF spans the first row; the 2-column grid keeps the rest on one screen. */
-.pm-menu{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px 12px;
+   Default state = two equal buttons (⬇ Save PDF | 📤 Share). When a Power User
+   enables ✉ Send to email it slots in as a full-width primary CTA on the top
+   row, so both the 2-button and 3-button layouts stay balanced. */
+.pm-menu{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:12px 14px;
   background:#fff;border-top:1px solid var(--border);flex-shrink:0;
-  padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));}
-.pm-menu-item{display:flex;align-items:center;justify-content:center;gap:7px;
-  border:1px solid var(--border);background:#fff;border-radius:9px;padding:12px 8px;
-  font-size:12.5px;font-weight:600;color:var(--dark);cursor:pointer;line-height:1.2;
-  transition:background .15s,border-color .15s,transform .05s;-webkit-tap-highlight-color:transparent;}
-.pm-menu-item:hover:not(:disabled){background:#f3f3f4;border-color:#c7c7c7;}
+  padding-bottom:calc(12px + env(safe-area-inset-bottom,0px));}
+.pm-menu-item{display:flex;align-items:center;justify-content:center;gap:8px;min-height:52px;
+  border:1.5px solid var(--border);background:#fff;border-radius:12px;padding:13px 10px;
+  font-size:13px;font-weight:700;color:var(--dark);cursor:pointer;line-height:1.15;
+  transition:background .15s,border-color .15s,transform .06s,box-shadow .15s;-webkit-tap-highlight-color:transparent;}
+.pm-menu-item .pmi-ic{font-size:17px;line-height:1;}
+.pm-menu-item:hover:not(:disabled){background:#f7f7f8;border-color:#bdbdbd;}
 .pm-menu-item:active:not(:disabled){transform:scale(.97);}
 .pm-menu-item:disabled{opacity:.4;cursor:not-allowed;}
-.pm-menu-item.primary{border-color:var(--red);color:var(--red);}
-.pm-menu-item.primary:hover:not(:disabled){background:#fff5f4;border-color:var(--red);}
 .pm-menu-item.pm-full{grid-column:1 / -1;}
+/* primary = filled red CTA — the main action when ✉ Send to email is enabled */
+.pm-menu-item.primary{background:var(--red);border-color:var(--red);color:#fff;
+  box-shadow:0 3px 10px rgba(228,29,21,.26);}
+.pm-menu-item.primary:hover:not(:disabled){background:#c9160f;border-color:#c9160f;}
+.pm-menu-item.primary:active:not(:disabled){transform:scale(.98);}
 
 .preview-filename{font-size:12.5px;color:var(--gray);margin-bottom:10px;word-break:break-all;}
 .preview-actions-row{display:flex;gap:10px;flex-wrap:wrap;}
@@ -723,9 +729,9 @@ table.pphoto tr td:last-child{ border-right:none !important; }
       </div>
     </div>
     <div class="pm-menu" role="menu">
-      <button class="pm-menu-item pm-full" id="pmSavePdf" role="menuitem">⬇ Save PDF</button>
-      <button class="pm-menu-item primary" id="pmSendEmail" role="menuitem">✉ Send to email</button>
-      <button class="pm-menu-item" id="pmShare" role="menuitem" title="ส่งไปยังแชท / แอปอื่น">📤 Share</button>
+      <button class="pm-menu-item primary pm-full" id="pmSendEmail" role="menuitem"><span class="pmi-ic">✉</span><span>Send to email</span></button>
+      <button class="pm-menu-item" id="pmSavePdf" role="menuitem"><span class="pmi-ic">⬇</span><span>Save PDF</span></button>
+      <button class="pm-menu-item" id="pmShare" role="menuitem" title="ส่งไปยังแชท / แอปอื่น"><span class="pmi-ic">📤</span><span>Share</span></button>
     </div>
   </div>
 
