@@ -77,7 +77,6 @@ function handleRequest(e) {
       case 'setImageURL':   result = setImageURL(params); break;
       case 'getImageBytes': result = getImageBytes(params); break;
       case 'repairImages':  result = repairImages(params); break;
-      case 'deleteAlias':   result = deleteAlias(params); break;
       case 'updatePart':    result = updatePart(params); break;
       case 'updateMachine': result = updateMachine(params); break;
       case 'getEditLog':    result = getEditLog(params); break;
