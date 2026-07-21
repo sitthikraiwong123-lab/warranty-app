@@ -119,40 +119,50 @@ input,select,textarea{font-family:inherit;font-size:14px;}
 .epm-restore-card{border:1px solid var(--border);border-radius:9px;padding:9px 11px;font-size:12.5px;}
 .epm-restore-card .rc-meta{color:var(--gray);font-size:11px;margin-bottom:4px;}
 .epm-restore-card .btn{margin-top:7px;padding:5px 10px;font-size:12px;}
-/* log usage cards (full history) */
-.log-card{background:#fff;border:1px solid #e6e8ec;border-radius:12px;padding:12px 14px;font-size:13px;display:flex;flex-direction:column;gap:6px;transition:box-shadow .15s;}
-.log-card:hover{box-shadow:0 4px 14px rgba(16,24,40,.08);}
-.log-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;}
-.log-card-head .log-type{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:6px;white-space:nowrap;}
-.log-type-warranty{background:#fef3c7;color:#92400e;} .log-type-export{background:#dbeafe;color:#1e40af;} .log-type-other{background:#f3f4f6;color:#374151;}
-.log-card-date{font-size:11px;color:#98a2b3;}
-.log-card-customer{font-weight:700;font-size:14px;color:#101828;}
-.log-card-part{display:flex;align-items:center;gap:6px;font-size:12.5px;color:#374151;}
-.log-card-part .log-art{font-weight:700;color:var(--red);font-size:11.5px;background:#fef2f2;padding:1px 6px;border-radius:5px;}
-.log-card-machine{font-size:12px;color:#667085;display:flex;align-items:center;gap:4px;}
-.log-card-qty{display:flex;gap:12px;font-size:12px;color:#374151;flex-wrap:wrap;}
-.log-card-qty span{display:inline-flex;align-items:center;gap:3px;}
-.log-card-note{font-size:11.5px;color:#98a2b3;font-style:italic;}
-.log-summary{display:flex;gap:12px;flex-wrap:wrap;background:linear-gradient(135deg,#fef2f2,#fff7ed);border:1px solid #fecaca;border-radius:12px;padding:12px 14px;margin-bottom:10px;}
-.log-summary .log-stat{display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;min-width:70px;}
-.log-stat-num{font-size:22px;font-weight:800;color:var(--red);}
-.log-stat-label{font-size:10.5px;color:#92400e;}
-/* filter search with dropdown suggestions */
-.filter-wrap{position:relative;width:100%;margin-bottom:10px;}
-.filter-input{width:100%;box-sizing:border-box;padding:10px 36px 10px 12px;border:1.5px solid var(--border);border-radius:10px;font-size:13.5px;background:#fff;transition:border-color .2s,box-shadow .2s;}
-.filter-input:focus{border-color:var(--red);box-shadow:0 0 0 3px rgba(228,29,21,.1);outline:none;}
-.filter-input::placeholder{color:#b0b5bf;}
-.filter-icon{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:16px;color:#b0b5bf;pointer-events:none;}
-.filter-dropdown{position:absolute;top:100%;left:0;right:0;max-height:220px;overflow:auto;background:#fff;border:1.5px solid var(--border);border-top:none;border-radius:0 0 10px 10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:20;display:none;}
-.filter-dropdown.open{display:block;}
-.filter-chip-row{display:flex;flex-wrap:wrap;gap:6px;padding:8px 10px;border-bottom:1px solid #f3f4f6;}
-.filter-chip{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:16px;font-size:11.5px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;cursor:pointer;transition:all .15s;white-space:nowrap;}
-.filter-chip:hover{background:var(--red);color:#fff;border-color:var(--red);}
-.filter-chip.active{background:var(--red);color:#fff;border-color:var(--red);}
-.filter-opt{padding:8px 12px;font-size:13px;cursor:pointer;transition:background .1s;border-bottom:1px solid #f7f8f9;}
-.filter-opt:hover{background:#fef2f2;}
-.filter-opt:last-child{border-bottom:none;}
-.filter-opt b{color:var(--red);}
+/* ---- combobox filter (search + slideable chips + selectable dropdown) ---- */
+.cbx{position:relative;margin-bottom:12px;}
+.cbx-field{display:flex;align-items:center;gap:7px;background:#fff;border:1.5px solid var(--border);border-radius:11px;padding:0 8px 0 12px;transition:border-color .18s,box-shadow .18s;}
+.cbx-field:focus-within{border-color:var(--red);box-shadow:0 0 0 3px rgba(228,29,21,.1);}
+.cbx-ico{font-size:14px;color:#9ca3af;flex-shrink:0;}
+.cbx-input{flex:1;border:none;outline:none;background:none;font-size:14px;padding:11px 0;min-width:0;color:var(--dark);}
+.cbx-input::placeholder{color:#b0b5bf;}
+.cbx-clear,.cbx-caret{border:none;background:none;cursor:pointer;flex-shrink:0;color:#9ca3af;display:flex;align-items:center;justify-content:center;}
+.cbx-clear{font-size:13px;width:26px;height:26px;border-radius:50%;display:none;}
+.cbx-clear.show{display:flex;} .cbx-clear:hover{background:#f3f4f6;color:var(--red);}
+.cbx-caret{font-size:11px;width:26px;height:26px;border-radius:7px;transition:transform .2s,background .15s;}
+.cbx-caret:hover{background:#f3f4f6;color:var(--red);}
+.cbx.open .cbx-caret{transform:rotate(180deg);color:var(--red);}
+.cbx-chips{display:flex;gap:6px;overflow-x:auto;padding:8px 1px 2px;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.cbx-chips::-webkit-scrollbar{display:none;}
+.cbx-chip{flex-shrink:0;padding:5px 13px;border-radius:16px;font-size:12px;font-weight:600;border:1.5px solid #e5e7eb;background:#fff;color:#475467;cursor:pointer;white-space:nowrap;transition:all .15s;}
+.cbx-chip:active{transform:scale(.94);}
+.cbx-chip.on{background:var(--red);color:#fff;border-color:var(--red);box-shadow:0 2px 8px rgba(228,29,21,.3);}
+.cbx-menu{position:absolute;top:calc(100% + 5px);left:0;right:0;max-height:250px;overflow-y:auto;background:#fff;border:1.5px solid #e6e8ec;border-radius:12px;box-shadow:0 12px 34px rgba(16,24,40,.16);z-index:40;display:none;padding:5px;-webkit-overflow-scrolling:touch;}
+.cbx.open .cbx-menu{display:block;}
+.cbx-opt{padding:10px 12px;font-size:13.5px;border-radius:8px;cursor:pointer;color:var(--dark);display:flex;align-items:center;gap:8px;transition:background .12s;}
+.cbx-opt:active,.cbx-opt.hi{background:#fef2f2;color:var(--red);}
+.cbx-opt .cbx-tag{font-size:10px;font-weight:700;color:#98a2b3;margin-left:auto;flex-shrink:0;}
+.cbx-empty{padding:16px;text-align:center;color:#98a2b3;font-size:12.5px;}
+/* ---- Log summary stats + table ---- */
+.log-summary{display:flex;gap:10px;margin-bottom:12px;}
+.log-summary .log-stat{flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;background:linear-gradient(135deg,#fff5f5,#fff);border:1.5px solid #fde0df;border-radius:12px;padding:11px 8px;}
+.log-stat-num{font-size:21px;font-weight:800;color:var(--red);line-height:1.1;}
+.log-stat-label{font-size:10.5px;color:#98a2b3;font-weight:600;}
+.log-tbl-wrap{border:1px solid #e6e8ec;border-radius:12px;overflow:hidden;background:#fff;}
+.log-tbl-scroll{overflow:auto;max-height:56vh;-webkit-overflow-scrolling:touch;}
+.log-tbl{border-collapse:collapse;width:100%;min-width:560px;font-size:12.5px;}
+.log-tbl thead th{position:sticky;top:0;background:#faf5f5;color:#6d4a48;font-weight:700;font-size:11px;text-align:left;padding:9px 11px;white-space:nowrap;border-bottom:2px solid #f0dede;z-index:1;}
+.log-tbl tbody td{padding:9px 11px;border-bottom:1px solid #f1f2f4;vertical-align:middle;white-space:nowrap;color:#374151;}
+.log-tbl tbody tr:nth-child(even){background:#fbfbfc;}
+.log-tbl tbody tr:hover{background:#fff6f5;}
+.log-tbl tbody tr:last-child td{border-bottom:none;}
+.log-tbl .lt-date{color:#98a2b3;font-size:11.5px;}
+.log-tbl .lt-cust{font-weight:700;color:#101828;}
+.log-tbl .lt-art{font-weight:700;color:var(--red);font-size:11.5px;background:#fef2f2;padding:1px 6px;border-radius:5px;}
+.log-tbl .lt-part{max-width:170px;overflow:hidden;text-overflow:ellipsis;}
+.log-tbl .lt-type{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;white-space:nowrap;}
+.lt-type-warranty{background:#fef3c7;color:#92400e;} .lt-type-export{background:#dbeafe;color:#1e40af;} .lt-type-other{background:#f3f4f6;color:#374151;}
+.log-tbl .lt-qty{font-weight:700;color:#101828;text-align:right;}
 /* companion-set editor */
 .cset-parts{display:flex;flex-direction:column;gap:6px;}
 .cset-part-row{display:flex;align-items:center;gap:8px;background:#f7f7f8;border-radius:8px;padding:6px 9px;font-size:13px;}
@@ -240,6 +250,8 @@ input,select,textarea{font-family:inherit;font-size:14px;}
 .db-add-btn .ico{ font-size:16px; line-height:1; }
 .db-export-btn.db-add-btn{ background:#fff; color:var(--red); border:1.5px solid var(--red); box-shadow:none; }
 .db-export-btn.db-add-btn:hover{ background:#fef2f2; box-shadow:0 3px 10px rgba(228,29,21,.15); }
+.db-count-line{ font-size:12px; color:var(--gray); margin:0 0 10px; }
+.db-count-line .db-count{ color:var(--red); }
 
 /* add-machine form (inside the shared .edit-part-modal shell) */
 .addm-form{ display:flex; flex-direction:column; gap:13px; }
@@ -2648,14 +2660,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
       : `<div class="db-status-line">ซิงค์ล่าสุด: ${lookupCache.syncedAt ? new Date(lookupCache.syncedAt).toLocaleString('th-TH') : '-'}</div>`;
 
     function uniqueVals(list,field){ const s=new Set(); list.forEach(r=>{const v=String(r[field]||'').trim(); if(v)s.add(v);}); return [...s].sort(); }
-    function filterChips(vals,tab){
-      if(!vals.length) return '';
-      return `<div class=”filter-chip-row” data-tab=”${tab}”>`+vals.slice(0,20).map(v=>{
-        const active = (_dbSearchQuery[tab]||'').trim().toLowerCase()===v.toLowerCase()?'active':'';
-        return `<span class=”filter-chip ${active}” data-val=”${escAttr(v)}”>${escDb(v)}</span>`;
-      }).join('')+(vals.length>20?`<span style=”font-size:11px;color:var(--gray);padding:4px;”>+${vals.length-20}</span>`:'')+'</div>';
-    }
-    const filterBox = (tab, placeholder, chips)=> `<div class=”filter-wrap” data-tab=”${tab}”><input type=”text” class=”filter-input db-filter-input” data-tab=”${tab}” placeholder=”${placeholder}” value=”${escAttr(_dbSearchQuery[tab]||'')}”><span class=”filter-icon”>🔍</span><div class=”filter-dropdown”>${chips}</div></div>`;
 
     function filterList(list, tab, fields){
       const q = (_dbSearchQuery[tab]||'').trim().toLowerCase();
@@ -2666,30 +2670,48 @@ document.addEventListener('DOMContentLoaded', ()=>{
       });
     }
 
+    // per-tab filter config, used to mount a shared combobox + partial refresh
+    const FILTER_CFG = {
+      machines: { data:()=>lookupCache.machines, fields:['MachineNumber','CustomerName','MachineType'],
+        values:()=>uniqueVals(lookupCache.machines,'CustomerName').concat(uniqueVals(lookupCache.machines,'MachineType')),
+        chips:()=>uniqueVals(lookupCache.machines,'CustomerName'),
+        placeholder:'ค้นหาเครื่อง... (เลข, ลูกค้า, รุ่น)', render:renderMachinesList },
+      parts: { data:()=>lookupCache.parts, fields:['ArticleNo','Description'],
+        values:()=>uniqueVals(lookupCache.parts,'Description'),
+        chips:()=>uniqueVals(lookupCache.parts,'Description'),
+        placeholder:'ค้นหาอะไหล่... (Article No, ชื่อ)', render:renderPartsList },
+      sets: { data:()=>lookupCache.companions||[], fields:['name'],
+        values:()=>uniqueVals(lookupCache.companions||[],'name'),
+        chips:()=>uniqueVals(lookupCache.companions||[],'name'),
+        placeholder:'ค้นหาชุดเบิก...', render:renderCompanionSets },
+    };
+
     let sectionHtml = '';
     if(dbActiveTab === 'pending'){
       sectionHtml = renderPendingTable(pending);
     } else if(dbActiveTab === 'machines'){
-      const filtered = filterList(lookupCache.machines, 'machines', ['MachineNumber','CustomerName','MachineType']);
-      const chips = filterChips(uniqueVals(lookupCache.machines,'CustomerName'),'machines') + filterChips(uniqueVals(lookupCache.machines,'MachineType'),'machines');
-      sectionHtml = `<div class=”db-add-bar”><button type=”button” class=”db-add-btn” id=”dbAddMachine”><span class=”ico”>＋</span> เพิ่มเครื่องใหม่</button><button type=”button” class=”db-add-btn db-export-btn” data-tab=”machines”>📥 Export</button></div>`
-        + filterBox('machines','ค้นหาเครื่อง... (เลข, ลูกค้า, รุ่น)', chips)
-        + `<p style=”font-size:12px;color:var(--gray);margin:0 0 10px;”>กด ✎ เพื่อแก้ไขเครื่องจักร · แสดง ${filtered.length}/${lookupCache.machines.length}</p>` + renderMachinesList(filtered);
+      const cfg = FILTER_CFG.machines;
+      const filtered = filterList(cfg.data(), 'machines', cfg.fields);
+      sectionHtml = `<div class="db-add-bar"><button type="button" class="db-add-btn" id="dbAddMachine"><span class="ico">＋</span> เพิ่มเครื่องใหม่</button><button type="button" class="db-add-btn db-export-btn" data-tab="machines">📥 Export</button></div>`
+        + `<div class="db-filter-host" data-tab="machines"></div>`
+        + `<p class="db-count-line">กด ✎ เพื่อแก้ไขเครื่องจักร · แสดง <b class="db-count">${filtered.length}</b>/${cfg.data().length}</p>`
+        + `<div class="db-list-host">${renderMachinesList(filtered)}</div>`;
     } else if(dbActiveTab === 'parts'){
-      const filtered = filterList(lookupCache.parts, 'parts', ['ArticleNo','Description']);
-      const chips = filterChips(uniqueVals(lookupCache.parts,'Description').slice(0,20),'parts');
-      sectionHtml = `<div class=”db-add-bar”><button type=”button” class=”db-add-btn” id=”dbAddPart”><span class=”ico”>＋</span> เพิ่มอะไหล่ใหม่</button><button type=”button” class=”db-add-btn db-export-btn” data-tab=”parts”>📥 Export</button></div>`
-        + filterBox('parts','ค้นหาอะไหล่... (Article No, ชื่อ)', chips)
-        + `<p style=”font-size:12px;color:var(--gray);margin:0 0 10px;”>แตะรูปเพื่อดูเต็ม · กด ✎ เพื่อแก้ไขอะไหล่ · แสดง ${filtered.length}/${lookupCache.parts.length}</p>` + renderPartsList(filtered);
+      const cfg = FILTER_CFG.parts;
+      const filtered = filterList(cfg.data(), 'parts', cfg.fields);
+      sectionHtml = `<div class="db-add-bar"><button type="button" class="db-add-btn" id="dbAddPart"><span class="ico">＋</span> เพิ่มอะไหล่ใหม่</button><button type="button" class="db-add-btn db-export-btn" data-tab="parts">📥 Export</button></div>`
+        + `<div class="db-filter-host" data-tab="parts"></div>`
+        + `<p class="db-count-line">แตะรูปเพื่อดูเต็ม · กด ✎ เพื่อแก้ไขอะไหล่ · แสดง <b class="db-count">${filtered.length}</b>/${cfg.data().length}</p>`
+        + `<div class="db-list-host">${renderPartsList(filtered)}</div>`;
     } else if(dbActiveTab === 'sets'){
-      const allSets = lookupCache.companions||[];
-      const filtered = filterList(allSets, 'sets', ['name']);
-      const chips = filterChips(uniqueVals(allSets,'name'),'sets');
-      sectionHtml = `<div class=”db-add-bar”><button type=”button” class=”db-add-btn db-export-btn” data-tab=”sets”>📥 Export</button></div>`
-        + filterBox('sets','ค้นหาชุดเบิก...', chips)
-        + `<p style=”font-size:12px;color:var(--gray);margin:0 0 10px;”>ชุดพาร์ทที่ต้องเบิกด้วยกัน · ⭐ = พาร์ทหลัก · แสดง ${filtered.length}/${allSets.length}</p>` + renderCompanionSets(filtered);
+      const cfg = FILTER_CFG.sets;
+      const filtered = filterList(cfg.data(), 'sets', cfg.fields);
+      sectionHtml = `<div class="db-add-bar"><button type="button" class="db-add-btn db-export-btn" data-tab="sets">📥 Export</button></div>`
+        + `<div class="db-filter-host" data-tab="sets"></div>`
+        + `<p class="db-count-line">ชุดพาร์ทที่ต้องเบิกด้วยกัน · ⭐ = พาร์ทหลัก · แสดง <b class="db-count">${filtered.length}</b>/${cfg.data().length}</p>`
+        + `<div class="db-list-host">${renderCompanionSets(filtered)}</div>`;
     } else if(dbActiveTab === 'trash'){
-      sectionHtml = `<p style=”font-size:12px;color:var(--gray);margin:0 0 10px;”>อะไหล่ที่ถูกลบ (สำรองไว้) · กด “กู้คืน” เพื่อนำกลับเข้าฐานข้อมูล</p>` + await renderRecycleBin();
+      sectionHtml = `<p class="db-count-line">อะไหล่ที่ถูกลบ (สำรองไว้) · กด "กู้คืน" เพื่อนำกลับเข้าฐานข้อมูล</p>` + await renderRecycleBin();
     }
 
     body.innerHTML = syncLine + renderDbTabs(pending) + `<div class="db-section-body">${sectionHtml}</div>`;
@@ -2698,21 +2720,46 @@ document.addEventListener('DOMContentLoaded', ()=>{
     body.querySelectorAll('.db-tab').forEach(btn=>{
       btn.onclick = async ()=>{ dbActiveTab = btn.dataset.tab; await renderDbModal(); };
     });
-    // DB tab search/filter with dropdown chips
-    body.querySelectorAll('.filter-wrap').forEach(wrap=>{
-      const inp = wrap.querySelector('.filter-input');
-      const dd = wrap.querySelector('.filter-dropdown');
-      const tab = wrap.dataset.tab;
-      let _t = null;
-      const applyFilter = ()=>{ _dbSearchQuery[tab] = inp.value; renderDbModal(); };
-      inp.oninput = ()=>{ clearTimeout(_t); _t = setTimeout(applyFilter, 250); };
-      inp.onfocus = ()=>{ if(dd && dd.children.length) dd.classList.add('open'); };
-      inp.onblur = ()=>{ setTimeout(()=>{ if(dd) dd.classList.remove('open'); }, 200); };
-      if(dd) dd.querySelectorAll('.filter-chip').forEach(chip=>{
-        chip.onclick = ()=>{ inp.value = chip.classList.contains('active')?'':chip.dataset.val; applyFilter(); };
+    // Wires the per-row handlers (thumbnail lightbox + ✎ edit) for a list of
+    // cards. Called after the initial render AND after every filter refresh, so
+    // freshly-rendered rows always respond. Scoped so a partial refresh only
+    // re-wires the swapped list, not the whole modal.
+    function wireDbListItems(scope){
+      scope.querySelectorAll('.db-part-thumb[data-full]').forEach(el=>{ el.onclick = ()=>openImageLightbox(el.dataset.full); });
+      scope.querySelectorAll('.db-edit-btn:not(.db-set-edit):not(.db-mc-edit)').forEach(btn=>{
+        btn.onclick = async ()=>{ const editor = await ensureSignedIn(); if(!editor) return; openEditPart(btn.dataset.articleno, editor); };
       });
-      if(inp.value){ inp.focus(); try{ inp.setSelectionRange(inp.value.length, inp.value.length); }catch(e){} }
-    });
+      scope.querySelectorAll('.db-mc-edit').forEach(btn=>{
+        btn.onclick = async ()=>{ const editor = await ensureSignedIn(); if(!editor) return; openEditMachine(btn.dataset.machineno, editor); };
+      });
+      scope.querySelectorAll('.db-set-edit').forEach(btn=>{
+        btn.onclick = ()=>{ const s=(lookupCache.companions||[]).find(x=>String(x.name||'')===btn.dataset.name); openCompanionSetEditor(s||null); };
+      });
+      const addSetBtn2 = scope.querySelector('#dbAddSet');
+      if(addSetBtn2) addSetBtn2.onclick = ()=>openCompanionSetEditor(null);
+    }
+    // DB tab search: mount the shared combobox and refresh only the list on change
+    const filterHost = body.querySelector('.db-filter-host');
+    if(filterHost){
+      const tab = filterHost.dataset.tab;
+      const cfg = FILTER_CFG[tab];
+      const listHost = body.querySelector('.db-list-host');
+      const countEl = body.querySelector('.db-count');
+      const combo = buildFilterCombo({
+        placeholder: cfg.placeholder,
+        values: cfg.values(),
+        chips: cfg.chips(),
+        initial: _dbSearchQuery[tab] || '',
+        onChange: (v)=>{
+          _dbSearchQuery[tab] = v;
+          const filtered = filterList(cfg.data(), tab, cfg.fields);
+          listHost.innerHTML = cfg.render(filtered);
+          if(countEl) countEl.textContent = filtered.length;
+          wireDbListItems(listHost);
+        }
+      });
+      filterHost.appendChild(combo);
+    }
     // Pending queue: fill in the code (→ Data Base) / discard
     body.querySelectorAll('.pend-resolve').forEach(btn=>{
       btn.onclick = async ()=>{
@@ -2728,25 +2775,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
     body.querySelectorAll('.pend-thumb[data-full]').forEach(el=>{
       el.onclick = ()=>openImageLightbox(el.dataset.full);
     });
-    // Parts: tap thumbnail → full-image lightbox (closes via Esc/Back/tap-outside)
-    body.querySelectorAll('.db-part-thumb[data-full]').forEach(el=>{
-      el.onclick = ()=>openImageLightbox(el.dataset.full);
-    });
-    // Parts: edit (✎) → sign-in gate → audited edit form (exclude set-edit buttons)
-    body.querySelectorAll('.db-edit-btn:not(.db-set-edit):not(.db-mc-edit)').forEach(btn=>{
-      btn.onclick = async ()=>{
-        const editor = await ensureSignedIn();
-        if(!editor) return;
-        openEditPart(btn.dataset.articleno, editor);
-      };
-    });
-    body.querySelectorAll('.db-mc-edit').forEach(btn=>{
-      btn.onclick = async ()=>{
-        const editor = await ensureSignedIn();
-        if(!editor) return;
-        openEditMachine(btn.dataset.machineno, editor);
-      };
-    });
+    // Parts/machines/sets list rows: thumbnail lightbox + ✎ edit (initial render)
+    wireDbListItems(body);
     // Recycle bin: restore a soft-deleted part (also gated by sign-in)
     body.querySelectorAll('.trash-restore-btn').forEach(btn=>{
       btn.onclick = async ()=>{
@@ -2774,12 +2804,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     // Parts tab visible → kick off the silent background image self-heal
     // (once per session; see autoRepairImages below).
     if(dbActiveTab === 'parts') autoRepairImages();
-    // Sets: add / edit companion set
-    const addSetBtn = body.querySelector('#dbAddSet');
-    if(addSetBtn) addSetBtn.onclick = ()=>openCompanionSetEditor(null);
-    body.querySelectorAll('.db-set-edit').forEach(btn=>{
-      btn.onclick = ()=>{ const s=(lookupCache.companions||[]).find(x=>String(x.name||'')===btn.dataset.name); openCompanionSetEditor(s||null); };
-    });
+    // (Sets add/edit + list-row ✎ handlers are wired by wireDbListItems above.)
     body.querySelectorAll('.db-export-btn').forEach(btn=>{
       btn.onclick = ()=>{
         const tab = btn.dataset.tab;
@@ -3749,6 +3774,68 @@ function buildComboBox(baseOptions, value, onChange, placeholder){
   return wrap;
 }
 
+/* Reusable filter combobox: a rounded search field (type to filter) + a row of
+   slide-able quick-pick chips + a caret that opens a scrollable dropdown of every
+   existing value (also type-filterable). Used by every search box so the whole
+   app searches the same way. onChange(value) fires debounced while typing, and
+   immediately on chip/option/clear. Built with DOM nodes (no innerHTML for the
+   dynamic values) so it can't be broken by quoting. */
+function buildFilterCombo(opts){
+  opts = opts || {};
+  const values = (opts.values || []).map(v=>String(v));
+  const chips  = (opts.chips  || values).map(v=>String(v));
+  const wrap = document.createElement('div');
+  wrap.className = 'cbx';
+  const field = document.createElement('div'); field.className = 'cbx-field';
+  const ico = document.createElement('span'); ico.className = 'cbx-ico'; ico.textContent = '🔍';
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.className = 'cbx-input'; inp.autocomplete = 'off';
+  inp.placeholder = opts.placeholder || 'ค้นหา...';
+  inp.value = opts.initial || '';
+  const clearBtn = document.createElement('button'); clearBtn.type='button'; clearBtn.className='cbx-clear'; clearBtn.textContent='✕'; clearBtn.title='ล้าง';
+  const caret = document.createElement('button'); caret.type='button'; caret.className='cbx-caret'; caret.textContent='▾'; caret.title='เลือกจากรายการ';
+  field.append(ico, inp, clearBtn, caret);
+  const chipRow = document.createElement('div'); chipRow.className = 'cbx-chips';
+  const menu = document.createElement('div'); menu.className = 'cbx-menu';
+  wrap.append(field, chipRow, menu);
+
+  function fire(){
+    clearBtn.classList.toggle('show', !!inp.value.trim());
+    const cur = inp.value.trim().toLowerCase();
+    chipRow.querySelectorAll('.cbx-chip').forEach(c=>c.classList.toggle('on', c.dataset.val.toLowerCase()===cur && cur!==''));
+    if(opts.onChange) opts.onChange(inp.value);
+  }
+  // slide-able quick chips
+  chips.slice(0, opts.chipCount||14).forEach(v=>{
+    const c = document.createElement('button'); c.type='button'; c.className='cbx-chip'; c.dataset.val=v; c.textContent=v;
+    c.onclick = ()=>{ const on = inp.value.trim().toLowerCase()===v.toLowerCase(); inp.value = on?'':v; wrap.classList.remove('open'); fire(); };
+    chipRow.appendChild(c);
+  });
+  if(!chipRow.children.length) chipRow.style.display = 'none';
+  // dropdown of every value (type-filtered)
+  function renderMenu(){
+    const q = inp.value.trim().toLowerCase();
+    const list = q ? values.filter(v=>v.toLowerCase().includes(q)) : values;
+    menu.textContent = '';
+    if(!list.length){ const e=document.createElement('div'); e.className='cbx-empty'; e.textContent='ไม่พบข้อมูล'; menu.appendChild(e); return; }
+    list.slice(0,80).forEach(v=>{
+      const o = document.createElement('div'); o.className='cbx-opt'; o.textContent=v;
+      o.onmousedown = e=>{ e.preventDefault(); inp.value=v; wrap.classList.remove('open'); fire(); };
+      menu.appendChild(o);
+    });
+    if(list.length>80){ const m=document.createElement('div'); m.className='cbx-empty'; m.textContent='…และอีก '+(list.length-80)+' รายการ (พิมพ์เพื่อค้นหา)'; menu.appendChild(m); }
+  }
+  let _t=null;
+  inp.oninput = ()=>{ clearTimeout(_t); _t=setTimeout(fire, 220); clearBtn.classList.toggle('show', !!inp.value.trim()); if(wrap.classList.contains('open')) renderMenu(); };
+  caret.onclick = ()=>{ const open = !wrap.classList.contains('open'); wrap.classList.toggle('open', open); if(open){ renderMenu(); inp.focus(); } };
+  clearBtn.onclick = ()=>{ inp.value=''; wrap.classList.remove('open'); fire(); inp.focus(); };
+  inp.onblur = ()=>{ setTimeout(()=>wrap.classList.remove('open'), 170); };
+  if(inp.value.trim()) clearBtn.classList.add('show');
+  wrap.getValue = ()=>inp.value;
+  wrap.focusEnd = ()=>{ inp.focus(); try{ inp.setSelectionRange(inp.value.length, inp.value.length); }catch(e){} };
+  return wrap;
+}
+
 /* ---------------- top-level fields ---------------- */
 function bindTopFields(){
   const $ = id=>document.getElementById(id);
@@ -3779,8 +3866,8 @@ function bindTopFields(){
    wherever it's shown (item-row 👁 button and the part editor). */
 function renderUsageRows(rows){
   if(!rows.length){
-    return '<div class=”db-empty”>ยังไม่มีประวัติการเบิก<br><span style=”font-size:11px;”>' +
-      'ระบบเริ่มเก็บตั้งแต่ตอนกด “✉ Export PDF → Email” (ไม่ได้เก็บย้อนหลังใบเก่า)</span></div>';
+    return '<div class="db-empty">ยังไม่มีประวัติการเบิก<br><span style="font-size:11px;">' +
+      'ระบบเริ่มเก็บตั้งแต่ตอนกด "✉ Export PDF → Email" (ไม่ได้เก็บย้อนหลังใบเก่า)</span></div>';
   }
   const seen = new Set();
   const unique = rows.filter(r=>{
@@ -3789,37 +3876,48 @@ function renderUsageRows(rows){
     seen.add(key);
     return true;
   });
-  return `<div class=”epm-note”>ใช้กับ <b>${unique.length}</b> ลูกค้า/รุ่น (จาก ${rows.length} ครั้งที่เบิก)</div>` +
-    `<div class=”epm-restore-list”>` + unique.map(r=>{
-      return `<div class=”epm-restore-card”>
+  return `<div class="epm-note">ใช้กับ <b>${unique.length}</b> ลูกค้า/รุ่น (จาก ${rows.length} ครั้งที่เบิก)</div>` +
+    `<div class="epm-restore-list">` + unique.map(r=>{
+      return `<div class="epm-restore-card">
         <div><b>${escHtml(r.Customer||'-')}</b></div>
         <div>🖥 ${escHtml(r.MachineType||'-')}</div>
       </div>`;
     }).join('') + `</div>`;
 }
+/* Full usage ledger as a scrollable table (used by the 📊 Log modal). Sticky
+   header, zebra rows; scrolls sideways on narrow phones so every column stays
+   readable. Summary stat pills sit above. */
 function renderUsageRowsFull(rows){
-  if(!rows.length) return '<div class=”db-empty”>ไม่มีข้อมูล</div>';
+  if(!rows.length) return '<div class="db-empty">ไม่มีข้อมูล</div>';
   const totalQty = rows.reduce((s,r)=>{ const n = parseFloat(r.Qty); return s + (isNaN(n)?0:n); }, 0);
   const customers = new Set(rows.map(r=>r.Customer).filter(Boolean));
-  const summary = `<div class=”log-summary”>
-    <div class=”log-stat”><div class=”log-stat-num”>${rows.length}</div><div class=”log-stat-label”>รายการ</div></div>
-    <div class=”log-stat”><div class=”log-stat-num”>${totalQty}</div><div class=”log-stat-label”>ชิ้น/ชุด</div></div>
-    <div class=”log-stat”><div class=”log-stat-num”>${customers.size}</div><div class=”log-stat-label”>ลูกค้า</div></div>
+  const summary = `<div class="log-summary">
+    <div class="log-stat"><div class="log-stat-num">${rows.length}</div><div class="log-stat-label">รายการ</div></div>
+    <div class="log-stat"><div class="log-stat-num">${totalQty}</div><div class="log-stat-label">ชิ้น/ชุด</div></div>
+    <div class="log-stat"><div class="log-stat-num">${customers.size}</div><div class="log-stat-label">ลูกค้า</div></div>
   </div>`;
-  const typeCls = t => { const l=(t||'').toLowerCase(); return l.includes('warranty')?'log-type-warranty':l.includes('export')?'log-type-export':'log-type-other'; };
-  return summary + `<div class=”epm-restore-list”>` + rows.map(r=>{
-    const when = r.Timestamp ? new Date(r.Timestamp).toLocaleString('th-TH',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-';
-    const machine = [r.MachineType, r.MachineNo].filter(Boolean).join(' · ');
-    const qty = [r.Qty, r.Unit].filter(v=>v!=='' && v!=null).join(' ');
-    return `<div class=”log-card”>
-      <div class=”log-card-head”><span class=”log-type ${typeCls(r.Type)}”>${escHtml(r.Type||'-')}</span><span class=”log-card-date”>${escHtml(when)}</span></div>
-      <div class=”log-card-customer”>${escHtml(r.Customer||'-')}</div>
-      <div class=”log-card-part”><span class=”log-art”>#${escHtml(r.ArticleNo||'-')}</span>${escHtml(r.PartName||'')}</div>
-      ${machine?'<div class=”log-card-machine”>🖥 '+escHtml(machine)+'</div>':''}
-      <div class=”log-card-qty”><span>📦 ${escHtml(qty||'-')}</span>${r.SetName?'<span>🔗 '+escHtml(r.SetName)+'</span>':''}${r.RecordedBy?'<span>👤 '+escHtml(r.RecordedBy)+'</span>':''}</div>
-      ${r.Note?'<div class=”log-card-note”>📝 '+escHtml(r.Note)+'</div>':''}
-    </div>`;
-  }).join('') + `</div>`;
+  const typeCls = t => { const l=(t||'').toLowerCase(); return l.includes('warranty')?'lt-type-warranty':l.includes('export')?'lt-type-export':'lt-type-other'; };
+  const body = rows.map(r=>{
+    const when = r.Timestamp ? new Date(r.Timestamp).toLocaleString('th-TH',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '-';
+    const machine = [r.MachineType, r.MachineNo].filter(Boolean).join(' · ') || '-';
+    const qty = [r.Qty, r.Unit].filter(v=>v!=='' && v!=null).join(' ') || '-';
+    return `<tr>
+      <td class="lt-date">${escHtml(when)}</td>
+      <td><span class="lt-type ${typeCls(r.Type)}">${escHtml(r.Type||'-')}</span></td>
+      <td class="lt-cust">${escHtml(r.Customer||'-')}</td>
+      <td><span class="lt-art">#${escHtml(r.ArticleNo||'-')}</span></td>
+      <td class="lt-part" title="${escAttr(r.PartName||'')}">${escHtml(r.PartName||'-')}</td>
+      <td>${escHtml(machine)}</td>
+      <td class="lt-qty">${escHtml(qty)}</td>
+      <td>${escHtml(r.RecordedBy||'-')}</td>
+    </tr>`;
+  }).join('');
+  return summary + `<div class="log-tbl-wrap"><div class="log-tbl-scroll"><table class="log-tbl">
+    <thead><tr>
+      <th>วันที่</th><th>ประเภท</th><th>ลูกค้า</th><th>Article</th><th>ชื่ออะไหล่</th><th>เครื่อง</th><th>จำนวน</th><th>ผู้บันทึก</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+  </table></div></div>`;
 }
 
 function downloadCsv(rows, columns, filename){
@@ -3879,10 +3977,10 @@ async function openUsageModal(articleNo){
 async function openLogModal(){
   const ov = document.createElement('div');
   ov.className = 'edit-part-modal open';
-  ov.innerHTML = `<div class="edit-part-dialog" style="max-width:600px;">
+  ov.innerHTML = `<div class="edit-part-dialog" style="max-width:640px;">
     <div class="epm-head"><span>📊 ประวัติการเบิกทั้งหมด</span><button type="button" class="epm-x">✕</button></div>
     <div class="epm-body">
-      <div class="filter-wrap"><input type="text" class="filter-input log-search" placeholder="ค้นหา... (ชื่อพาร์ท, ลูกค้า, รุ่นเครื่อง, Article No)"><span class="filter-icon">🔍</span><div class="filter-dropdown log-chips"></div></div>
+      <div class="log-filter-host"></div>
       <div class="log-body"><div class="db-empty">กำลังโหลด...</div></div>
     </div>
     <div class="epm-actions"><button type="button" class="btn btn-primary log-export" style="border:1.5px solid var(--red);background:#fff;color:var(--red);">📥 Export Excel</button><button type="button" class="btn epm-close">ปิด</button></div>
@@ -3894,9 +3992,7 @@ async function openLogModal(){
   modalOpened();
 
   const bodyEl = ov.querySelector('.log-body');
-  const searchInp = ov.querySelector('.log-search');
-  const chipsEl = ov.querySelector('.log-chips');
-  const filterWrap = ov.querySelector('.filter-wrap');
+  const filterHost = ov.querySelector('.log-filter-host');
   let allRows = [];
   let _filteredRows = [];
   try{
@@ -3908,32 +4004,24 @@ async function openLogModal(){
       (m.includes('Unknown action') ? ' → ต้อง Deploy Code.gs ใหม่' : '') + '</div>';
     return;
   }
-  function buildChips(){
-    const custSet = new Set(), typeSet = new Set();
-    allRows.forEach(r=>{ if(r.Customer)custSet.add(r.Customer); if(r.Type)typeSet.add(r.Type); });
-    const q = (searchInp.value||'').trim().toLowerCase();
-    const chipHtml = (vals,label)=>{
-      if(!vals.length) return '';
-      return `<div class="filter-chip-row"><span style="font-size:10px;color:var(--gray);width:100%;margin-bottom:2px;">${label}</span>${vals.map(v=>`<span class="filter-chip ${q===v.toLowerCase()?'active':''}" data-val="${escAttr(v)}">${escHtml(v)}</span>`).join('')}</div>`;
-    };
-    chipsEl.innerHTML = chipHtml([...typeSet].sort(),'ประเภท') + chipHtml([...custSet].sort(),'ลูกค้า');
-    chipsEl.querySelectorAll('.filter-chip').forEach(chip=>{
-      chip.onclick = ()=>{ searchInp.value = chip.classList.contains('active')?'':chip.dataset.val; renderFiltered(); };
-    });
-  }
-  function renderFiltered(){
-    const q = (searchInp.value||'').trim().toLowerCase();
+  const uniq = f => [...new Set(allRows.map(r=>String(r[f]||'').trim()).filter(Boolean))].sort();
+  function renderFiltered(v){
+    const q = (v||'').trim().toLowerCase();
     _filteredRows = !q ? allRows : allRows.filter(r=>{
       const hay = [r.Customer,r.ArticleNo,r.PartName,r.MachineType,r.MachineNo,r.Type,r.RecordedBy].join(' ').toLowerCase();
       return q.split(/\s+/).every(w=>hay.includes(w));
     });
     bodyEl.innerHTML = renderUsageRowsFull(_filteredRows);
-    buildChips();
   }
-  renderFiltered();
-  searchInp.oninput = renderFiltered;
-  searchInp.onfocus = ()=>{ if(chipsEl.children.length) chipsEl.classList.add('open'); };
-  searchInp.onblur = ()=>{ setTimeout(()=>chipsEl.classList.remove('open'), 200); };
+  // shared combobox: type to search, chips for quick customer pick, caret for full list
+  const combo = buildFilterCombo({
+    placeholder: 'ค้นหา... (ชื่อพาร์ท, ลูกค้า, รุ่น, Article No)',
+    values: uniq('Customer').concat(uniq('MachineType')),
+    chips: uniq('Type').concat(uniq('Customer')),
+    onChange: renderFiltered
+  });
+  filterHost.appendChild(combo);
+  renderFiltered('');
   ov.querySelector('.log-export').onclick = ()=>{
     const cols = [
       {key:'Timestamp',label:'วันที่',fmt:r=>r.Timestamp?new Date(r.Timestamp).toLocaleString('th-TH'):''},{key:'Type',label:'ประเภท'},
