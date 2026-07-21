@@ -1524,7 +1524,10 @@ let lookupOnline = navigator.onLine;
    flips a flag once and every device picks it up on next load — no per-device
    drift. Cached in lkv for instant/offline start; refreshed on load and after
    each sync. See getAppSettings/setAppSettings/reserveExportNumber in Code.gs. */
-const DEFAULT_APP_SETTINGS = { fmtToolbar:false, runNumberEnabled:false, paSend:false, paUrl:'', hideSendEmail:false, runPrefix:'TL', runYear:(new Date()).getFullYear(), runNext:1 };
+// hideSendEmail defaults TRUE: ✉ Send to email is HIDDEN out of the box and a
+// Power User reveals it from the ⚡ Power Automate page (that switch is the only
+// place it's controlled). Only ⬇ Save PDF / 📤 Share show until then.
+const DEFAULT_APP_SETTINGS = { fmtToolbar:false, runNumberEnabled:false, paSend:false, paUrl:'', hideSendEmail:true, runPrefix:'TL', runYear:(new Date()).getFullYear(), runNext:1 };
 let appSettings = Object.assign({}, DEFAULT_APP_SETTINGS);
 function fmtToolbarOn(){ return !!appSettings.fmtToolbar; }
 function paSendOn(){ return !!appSettings.paSend; }
