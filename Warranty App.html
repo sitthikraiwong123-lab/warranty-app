@@ -1902,9 +1902,23 @@ document.addEventListener('DOMContentLoaded', ()=>{
     return `<div class="db-table-wrap" style="overflow:auto;"><table class="db-table">${head}${body}</table></div>${more}`;
   }
 
-  // Cache-buster token: bumped whenever a part image is added/replaced/removed
-  // so the browser re-fetches the changed image instead of serving a stale one.
-  // It stays constant between changes, so normal caching still applies otherwise.
+  function renderMachinesList(machines){
+    if(!machines || !machines.length) return '<div class="db-empty">ไม่มีข้อมูล (0 แถว)</div>';
+    const html = machines.slice(0, 100).map(m => {
+      const no = String(m.MachineNumber||'');
+      return `<div class="db-part-card">
+        <div class="db-part-info" style="flex:1;">
+          <div class="part-alias-no" style="font-weight:700;">#${escDb(no)}</div>
+          <div class="part-alias-desc">${escDb(m.MachineType||'-')}</div>
+          <div style="font-size:12px;color:var(--gray);">${escDb(m.CustomerName||'-')}</div>
+        </div>
+        <button type="button" class="db-edit-btn db-mc-edit" data-machineno="${escAttr(no)}" title="แก้ไข">✎</button>
+      </div>`;
+    }).join('');
+    const more = machines.length > 100 ? `<div class="db-status-line">...และอีก ${machines.length - 100} เครื่อง</div>` : '';
+    return `<div class="db-part-list">${html}</div>${more}`;
+  }
+
   let _imgCacheToken = '';
 
   // Shared part-thumbnail renderer. Every view (parts list, kit editor, kit
@@ -2146,6 +2160,83 @@ document.addEventListener('DOMContentLoaded', ()=>{
       lower.add(k); out.push(s);
     });
     return out.sort((a,b)=>a.localeCompare(b));
+  }
+
+  function openEditMachine(machineNo, signedInEditor){
+    const machine = lookupCache.machines.find(m => String(m.MachineNumber||'').trim().toLowerCase() === String(machineNo).trim().toLowerCase());
+    if(!machine){ flashStatus('ไม่พบเครื่อง'); return; }
+    let editor = (signedInEditor || getSessionEditor() || '').trim();
+    const origNo = String(machine.MachineNumber||'');
+    let noVal = origNo;
+    let customerVal = String(machine.CustomerName||'');
+    let typeVal = String(machine.MachineType||'');
+
+    const custOpts = mergeAutocomplete(CUSTOMERS, dbDistinctValues(lookupCache.machines, 'CustomerName'));
+    const typeOpts = mergeAutocomplete(MACHINE_TYPES, dbDistinctValues(lookupCache.machines, 'MachineType'));
+
+    const ov = document.createElement('div');
+    ov.className = 'edit-part-modal open';
+
+    function renderEdit(){
+      ov.innerHTML = `
+        <div class="edit-part-dialog">
+          <div class="epm-head"><span>แก้ไขเครื่องจักร</span><button type="button" class="epm-x">✕</button></div>
+          <div class="epm-body">
+            <div class="epm-signed">✅ ผู้แก้ไข: <span class="who">${escDb(editor||'-')}</span><button type="button" class="epm-changeuser chg">เปลี่ยนผู้ใช้</button></div>
+            <div class="addm-form">
+              <label>Customer Name<div class="addm-cust"></div></label>
+              <label>Machine No <span class="req">*</span><input type="text" class="addm-no" value="${escAttr(noVal)}" autocomplete="off"></label>
+              <label>Machine Type / Model<div class="addm-type"></div></label>
+            </div>
+          </div>
+          <div class="epm-actions">
+            <button type="button" class="btn epm-cancel">ยกเลิก</button>
+            <button type="button" class="btn btn-primary epm-save">บันทึกการแก้ไข</button>
+          </div>
+        </div>`;
+      const custBox = buildComboBox(custOpts, customerVal, v=>{ customerVal = v; }, '- เลือก/พิมพ์ชื่อลูกค้า -');
+      const typeBox = buildComboBox(typeOpts, typeVal, v=>{ typeVal = v; }, '- เลือก/พิมพ์รุ่นเครื่อง -');
+      ov.querySelector('.addm-cust').appendChild(custBox);
+      ov.querySelector('.addm-type').appendChild(typeBox);
+      const noInp = ov.querySelector('.addm-no');
+      noInp.oninput = ()=>{ noVal = noInp.value; };
+      ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
+      ov.querySelector('.epm-cancel').onclick = ()=>userDismissTopModal();
+      const chgBtn = ov.querySelector('.epm-changeuser');
+      if(chgBtn) chgBtn.onclick = async ()=>{ const e2 = await requireEditorSignIn(); if(e2){ editor = e2; renderEdit(); } };
+      ov.querySelector('.epm-save').onclick = save;
+    }
+
+    async function save(){
+      editor = (editor||'').trim();
+      if(!editor){ alert('กรุณาลงชื่อผู้แก้ไขก่อน'); return; }
+      noVal = (noVal||'').trim(); customerVal = (customerVal||'').trim(); typeVal = (typeVal||'').trim();
+      if(!noVal){ alert('กรุณากรอก Machine No'); return; }
+      setSessionEditor(editor);
+      const btn = ov.querySelector('.epm-save'); if(btn) btn.disabled=true;
+      const payload = { origMachineNo: origNo, editor };
+      if(noVal.toLowerCase() !== origNo.toLowerCase()) payload.newMachineNo = noVal;
+      if(customerVal !== String(machine.CustomerName||'')) payload.newCustomerName = customerVal;
+      if(typeVal !== String(machine.MachineType||'')) payload.newMachineType = typeVal;
+      try{
+        await lookupApiCall('updateMachine', payload);
+        machine.MachineNumber = noVal;
+        machine.CustomerName = customerVal;
+        machine.MachineType = typeVal;
+        lookupCache.cacheVersion = LOOKUP_CACHE_VERSION; await lkvSet('cache', lookupCache);
+        flashStatus('บันทึกการแก้ไขเครื่องแล้ว');
+        userDismissTopModal();
+        await renderDbModal();
+      }catch(err){
+        if(btn) btn.disabled=false;
+        const m=String(err.message||err);
+        alert('บันทึกไม่สำเร็จ: '+m+(m.includes('Unknown action')?'\n→ ต้อง Deploy Code.gs ใหม่':''));
+      }
+    }
+
+    renderEdit();
+    document.body.appendChild(ov);
+    modalOpened();
   }
 
   // ----- Add a new MACHINE (Customer / Machine No / Machine Type) -----
@@ -2522,7 +2613,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if(dbActiveTab === 'pending'){
       sectionHtml = renderPendingTable(pending);
     } else if(dbActiveTab === 'machines'){
-      sectionHtml = `<div class="db-add-bar"><button type="button" class="db-add-btn" id="dbAddMachine"><span class="ico">＋</span> เพิ่มเครื่องใหม่</button></div>` + renderDbTable(lookupCache.machines);
+      sectionHtml = `<div class="db-add-bar"><button type="button" class="db-add-btn" id="dbAddMachine"><span class="ico">＋</span> เพิ่มเครื่องใหม่</button></div>`
+        + `<p style="font-size:12px;color:var(--gray);margin:0 0 10px;">กด ✎ เพื่อแก้ไขเครื่องจักร</p>` + renderMachinesList(lookupCache.machines);
     } else if(dbActiveTab === 'parts'){
       sectionHtml = `<div class="db-add-bar"><button type="button" class="db-add-btn" id="dbAddPart"><span class="ico">＋</span> เพิ่มอะไหล่ใหม่</button></div>`
         + `<p style="font-size:12px;color:var(--gray);margin:0 0 10px;">แตะรูปเพื่อดูเต็ม · กด ✎ เพื่อแก้ไขอะไหล่</p>` + renderPartsList(lookupCache.parts);
@@ -2558,11 +2650,18 @@ document.addEventListener('DOMContentLoaded', ()=>{
       el.onclick = ()=>openImageLightbox(el.dataset.full);
     });
     // Parts: edit (✎) → sign-in gate → audited edit form (exclude set-edit buttons)
-    body.querySelectorAll('.db-edit-btn:not(.db-set-edit)').forEach(btn=>{
+    body.querySelectorAll('.db-edit-btn:not(.db-set-edit):not(.db-mc-edit)').forEach(btn=>{
       btn.onclick = async ()=>{
         const editor = await ensureSignedIn();
-        if(!editor) return;                       // cancelled the sign-in → stay put
+        if(!editor) return;
         openEditPart(btn.dataset.articleno, editor);
+      };
+    });
+    body.querySelectorAll('.db-mc-edit').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const editor = await ensureSignedIn();
+        if(!editor) return;
+        openEditMachine(btn.dataset.machineno, editor);
       };
     });
     // Recycle bin: restore a soft-deleted part (also gated by sign-in)
