@@ -89,6 +89,7 @@ function handleRequest(e) {
       case 'deleteCompanionSet': result = deleteCompanionSet(params); break;
       case 'recordPartUsage':    result = recordPartUsage(params); break;
       case 'getPartUsage':       result = getPartUsage(params); break;
+      case 'getAllPartUsage':    result = getAllPartUsage(params); break;
       case 'addPendingPart':     result = addPendingPart(params); break;
       case 'getPendingParts':    result = getPendingParts(params); break;
       case 'deletePendingPart':  result = deletePendingPart(params); break;
@@ -1353,6 +1354,20 @@ function getPartUsage(params) {
     out.push(o);
   }
   return { success: true, articleNo: articleNo, rows: out };
+}
+
+function getAllPartUsage(params) {
+  var limit = Number((params && params.limit) || 500);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTUSAGE_SHEET);
+  if (!sh || sh.getLastRow() < 2) return { success: true, rows: [] };
+  var values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_HEADERS.length).getValues();
+  var out = [];
+  for (var i = values.length - 1; i >= 0 && out.length < limit; i--) {
+    var o = {};
+    PARTUSAGE_HEADERS.forEach(function (h, c) { o[h] = values[i][c] instanceof Date ? values[i][c].toISOString() : values[i][c]; });
+    out.push(o);
+  }
+  return { success: true, rows: out };
 }
 
 // ============================================================
