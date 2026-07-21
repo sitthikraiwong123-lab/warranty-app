@@ -90,6 +90,8 @@ function handleRequest(e) {
       case 'recordPartUsage':    result = recordPartUsage(params); break;
       case 'getPartUsage':       result = getPartUsage(params); break;
       case 'getAllPartUsage':    result = getAllPartUsage(params); break;
+      case 'deletePartUsage':    result = deletePartUsage(params); break;
+      case 'updatePartUsage':    result = updatePartUsage(params); break;
       case 'addPendingPart':     result = addPendingPart(params); break;
       case 'getPendingParts':    result = getPendingParts(params); break;
       case 'deletePendingPart':  result = deletePendingPart(params); break;
@@ -1375,9 +1377,48 @@ function getAllPartUsage(params) {
   for (var i = values.length - 1; i >= 0 && out.length < limit; i--) {
     var o = {};
     PARTUSAGE_HEADERS.forEach(function (h, c) { o[h] = values[i][c] instanceof Date ? values[i][c].toISOString() : values[i][c]; });
+    o._row = i + 2;                 // actual sheet row, so a client can edit/delete this exact entry
     out.push(o);
   }
   return { success: true, rows: out };
+}
+
+// Guard for edit/delete: confirm the sheet row is still the one the client saw
+// (OrderId / ArticleNo / PartName), so a shifted row is never touched by mistake.
+function usageRowMatches_(vals, match) {
+  if (!match) return true;
+  function n(v) { return String(v == null ? '' : v).trim().toLowerCase(); }
+  if (match.OrderId != null && n(vals[1]) !== n(match.OrderId)) return false;   // col B
+  if (match.ArticleNo != null && n(vals[6]) !== n(match.ArticleNo)) return false; // col G
+  if (match.PartName != null && n(vals[7]) !== n(match.PartName)) return false;   // col H
+  return true;
+}
+
+// Delete one PartUsage row (a wrong / test entry). params: { row, match }
+function deletePartUsage(params) {
+  var row = Number(params && params.row);
+  if (!row || row < 2) throw new Error('row required');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTUSAGE_SHEET);
+  if (!sh || row > sh.getLastRow()) return { success: false, error: 'ไม่พบแถว — โหลดใหม่แล้วลองอีกครั้ง' };
+  var vals = sh.getRange(row, 1, 1, PARTUSAGE_HEADERS.length).getValues()[0];
+  if (!usageRowMatches_(vals, params && params.match)) return { success: false, error: 'ข้อมูลเปลี่ยนไป — โหลดใหม่แล้วลองอีกครั้ง' };
+  sh.deleteRow(row);
+  return { success: true };
+}
+
+// Edit fields of one PartUsage row. params: { row, match, updates:{Header:value} }
+function updatePartUsage(params) {
+  var row = Number(params && params.row);
+  if (!row || row < 2) throw new Error('row required');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTUSAGE_SHEET);
+  if (!sh || row > sh.getLastRow()) return { success: false, error: 'ไม่พบแถว — โหลดใหม่แล้วลองอีกครั้ง' };
+  var vals = sh.getRange(row, 1, 1, PARTUSAGE_HEADERS.length).getValues()[0];
+  if (!usageRowMatches_(vals, params && params.match)) return { success: false, error: 'ข้อมูลเปลี่ยนไป — โหลดใหม่แล้วลองอีกครั้ง' };
+  var updates = (params && params.updates) || {};
+  PARTUSAGE_HEADERS.forEach(function (h, c) {
+    if (Object.prototype.hasOwnProperty.call(updates, h)) sh.getRange(row, c + 1).setValue(updates[h]);
+  });
+  return { success: true };
 }
 
 // ============================================================
