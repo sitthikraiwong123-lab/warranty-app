@@ -842,7 +842,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
 <div class="container">
 
   <div class="card">
-    <h2>ข้อมูลหลัก</h2>
+    <h2>Main Info</h2>
     <div class="field-row field-row-2">
       <label>Priority<div id="priorityWrap"></div></label>
       <label>Type<div class="type-run-row"><div id="typeWrap"></div><button type="button" id="runNumberChip" class="run-num-chip" style="display:none;" title="เลขที่เอกสาร"></button></div></label>
@@ -873,7 +873,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
   </div>
 
   <div class="card" id="previewCard" style="display:none;">
-    <h2>PDF พร้อมแล้ว</h2>
+    <h2>PDF Ready</h2>
     <div class="preview-filename" id="previewFilename"></div>
     <div class="preview-actions-row">
       <button class="btn btn-primary" id="btnOpenPdf">เปิดดู PDF</button>
@@ -5761,7 +5761,8 @@ const TH_EN = {
   'ดูข้อมูล Database ที่ซิงค์มา':'View the synced Database',
   'สลับภาษา UI — บิล PDF เป็นภาษาอังกฤษเสมอ':'Switch UI language — the PDF bill is always English',
   // main form
-  'ข้อมูลหลัก':'Main Info',
+  // Section headings (Main Info / Parts & Machines / PDF Ready / Draft) are all
+  // hardcoded English in both languages — no entries needed.
   'กำลังเชื่อมต่อฐานข้อมูล...':'Connecting to database...',
   'กำลังซิงค์ฐานข้อมูล...':'Syncing database...',
   'ที่อยู่ออกบิล / จัดส่ง (ค่าเริ่มต้น แก้ไขได้)':'Invoice / shipping address (defaults, editable)',
@@ -5772,7 +5773,6 @@ const TH_EN = {
   // Section heading is hardcoded English ("Parts & Machines (maximum 8 items)")
   // in both languages, matching the English field labels around it — no entry needed.
   // "＋ Add item" is hardcoded English in both languages — no entry needed.
-  'PDF พร้อมแล้ว':'PDF is ready',
   'เปิดดู PDF':'Open PDF',
   'ดาวน์โหลด PDF':'Download PDF',
   'เปิดไม่ขึ้น/หาไม่เจอ? ลองกด "ดาวน์โหลด PDF" แล้วเปิดจากโฟลเดอร์ดาวน์โหลดในเครื่องได้เลย':'Can\'t open / find it? Tap "Download PDF" and open it from your Downloads folder.',
