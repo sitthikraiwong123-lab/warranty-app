@@ -92,6 +92,7 @@ function handleRequest(e) {
       case 'getAllPartUsage':    result = getAllPartUsage(params); break;
       case 'deletePartUsage':    result = deletePartUsage(params); break;
       case 'updatePartUsage':    result = updatePartUsage(params); break;
+      case 'backfillPartUsageArticleNo': result = backfillPartUsageArticleNo(params); break;
       case 'addPendingPart':     result = addPendingPart(params); break;
       case 'getPendingParts':    result = getPendingParts(params); break;
       case 'deletePendingPart':  result = deletePendingPart(params); break;
@@ -1339,6 +1340,52 @@ function recordPartUsage(params) {
       sh.getRange(sh.getLastRow() + 1, 1, rows.length, PARTUSAGE_HEADERS.length).setValues(rows);
     }
     return { success: true, orderId: orderId, written: rows.length };
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
+}
+
+// Backfill the Article No onto ledger rows that were written BEFORE the code
+// was known. A codeless part is logged by name only (see recordPartUsage), so
+// once the ⏳ pending queue finally gets its real code, the history rows it
+// already produced would otherwise stay blank forever.
+//
+// Only rows whose ArticleNo is still EMPTY are touched — a row that already
+// carries a code belongs to a different part that happens to share a name, and
+// overwriting it would corrupt real history. Timestamp is deliberately left
+// alone so the entries keep their original position when the Log is sorted.
+//
+// PendingParts holds one row per part NAME while the ledger holds one row per
+// order, so a single fill-in can legitimately update several rows at once.
+// params: { partName, articleNo }
+function backfillPartUsageArticleNo(params) {
+  const name = String((params && params.partName) || '').trim();
+  const articleNo = String((params && params.articleNo) || '').trim();
+  if (!name) throw new Error('partName required');
+  if (!articleNo) throw new Error('articleNo required');
+
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTUSAGE_SHEET);
+  if (!sh || sh.getLastRow() < 2) return { success: true, updated: 0 };
+
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    const last = sh.getLastRow();
+    const artCol = PARTUSAGE_HEADERS.indexOf('ArticleNo') + 1;   // G
+    const nameCol = PARTUSAGE_HEADERS.indexOf('PartName') + 1;   // H
+    const arts = sh.getRange(2, artCol, last - 1, 1).getValues();
+    const names = sh.getRange(2, nameCol, last - 1, 1).getValues();
+    const target = name.toLowerCase();
+    let updated = 0;
+    for (var i = 0; i < names.length; i++) {
+      if (String(arts[i][0]).trim()) continue;                       // already coded
+      if (String(names[i][0]).trim().toLowerCase() !== target) continue;
+      arts[i][0] = articleNo;
+      updated++;
+    }
+    // One write for the whole column — far cheaper than a setValue per row.
+    if (updated) sh.getRange(2, artCol, last - 1, 1).setValues(arts);
+    return { success: true, updated: updated };
   } finally {
     try { lock.releaseLock(); } catch (e) {}
   }

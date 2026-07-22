@@ -2739,7 +2739,31 @@ document.addEventListener('DOMContentLoaded', ()=>{
         }
         await lookupApiCall('deletePendingPart', { pendingId: row.PendingId });
         _pendingPartsCache = (_pendingPartsCache||[]).filter(r => String(r.PendingId) !== String(row.PendingId));
-        flashStatus('บันทึกเข้า Data Base แล้ว: #' + articleNo);
+
+        /* Backfill the code onto the Log rows this part already produced while it
+           was still codeless — recordPartUsage logs a codeless part by NAME, so
+           without this those rows stay blank forever. The backend only fills rows
+           whose ArticleNo is empty and never touches Timestamp, so the entries
+           keep their original date and their position in the Log's ordering.
+           Both names are tried: the Log rows were written under the requisition
+           name, which the user may just have renamed in this dialog.
+           Best-effort — the part is already in the Data Base by this point, so a
+           failure here must not fail the save; it only leaves the rows as before. */
+        const backfillNames = [];
+        [reqName, partName].forEach(nm=>{
+          const n = String(nm||'').trim();
+          if(n && !backfillNames.some(x => x.toLowerCase() === n.toLowerCase())) backfillNames.push(n);
+        });
+        let backfilled = 0;
+        for(const n of backfillNames){
+          try{
+            const bf = await lookupQueueOrSend('backfillPartUsageArticleNo', { partName: n, articleNo });
+            if(bf && bf.updated) backfilled += bf.updated;
+          }catch(e){ console.error('backfillPartUsageArticleNo failed', e); }
+        }
+
+        flashStatus('บันทึกเข้า Data Base แล้ว: #' + articleNo
+          + (backfilled ? ' · เติมรหัสใน Log ' + backfilled + ' รายการ' : ''));
         userDismissTopModal();
         await lookupSync();
         await renderDbModal();
@@ -6235,6 +6259,10 @@ const TH_EN_RULES = [
   [/^จำนวน (.+)$/, (m,p1)=>'Qty ' + p1.replace(' · ชุด: ', ' · set: ')],
   [/^เพิ่มเครื่องแล้ว: (.*)$/, 'Machine added: $1'],
   [/^เพิ่มอะไหล่แล้ว: (.*)$/, 'Part added: $1'],
+  /* MUST stay above the plain 'บันทึกเข้า Data Base แล้ว:' rule below — rules are
+     tried in order, and that one's (.*) would swallow this Thai suffix. */
+  [/^บันทึกเข้า Data Base แล้ว: (.+) · เติมรหัสใน Log (\d+) รายการ$/,
+     'Saved to Data Base: $1 · code filled into $2 Log row(s)'],
   [/^บันทึกเข้า Data Base แล้ว: (.*)$/, 'Saved to Data Base: $1'],
 
   /* --- failures that carry an error message --- */
