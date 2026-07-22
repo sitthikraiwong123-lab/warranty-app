@@ -834,7 +834,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
       <button class="tm-item tm-admin" id="btnNew" role="menuitem" style="display:none;" title="สร้างใบสั่งใหม่ — ข้อมูลที่ยังไม่บันทึกจะหายไป"><span class="tm-ic">＋</span><span class="tm-txt">New</span></button>
       <button class="tm-item tm-admin" id="btnFmtToggle" role="menuitem" style="display:none;" title="เปิด-ปิด toolbar จัดข้อความ (B/I/U/สี) ในช่อง Description"><span class="tm-ic">🛠</span><span class="tm-txt">Format toolbar</span><span class="tm-sw" id="swFmt"></span></button>
       <button class="tm-item tm-admin" id="btnRunNumToggle" role="menuitem" style="display:none;" title="เปิด-ปิดการรันเลขที่เอกสาร (TL{ปี}-{เลข}) — ตั้งค่าเป็นกลาง มีผลกับทุกคน"><span class="tm-ic">🔢</span><span class="tm-txt">Running number</span><span class="tm-sw" id="swRun"></span></button>
-      <button class="tm-item tm-admin" id="btnPowerAutomate" role="menuitem" style="display:none;" title="ตั้งค่า Power Automate — เปิด-ปิดส่งตรง, ลิงก์ Flow, อีเมลผู้รับ"><span class="tm-ic">⚡</span><span class="tm-txt">Power Automate</span><span class="tm-val" id="paMenuVal">ปิด</span><span class="tm-chev">›</span></button>
+      <button class="tm-item tm-admin" id="btnPowerAutomate" role="menuitem" style="display:none;" title="ตั้งค่า Power Automate — เปิด-ปิดส่งตรง, ลิงก์ Flow, อีเมลผู้รับ"><span class="tm-ic">⚡</span><span class="tm-txt">Power Automate</span><span class="tm-val" id="paMenuVal">ปิดอยู่</span><span class="tm-chev">›</span></button>
     </div>
   </div>
 </div>
@@ -1503,7 +1503,17 @@ window.ensureSarabunFontFace = ensureSarabunFontFace;
 (function(){
 'use strict';
 
-const CUSTOMERS = ["Delton-TH","Dynamic-TH","Ifound-TH","CMK-TH","Starteam-TH","WUS-TH","VGT-TH","KCET-TH","KCEE-TH","E&E-TH","CI-TH","Fujikura-TH","Unimicron-TH","WTT-TH","Fineline-TH","Olympic-TH"];
+/* ---- native dialogs speak the UI language ----
+   alert / confirm / prompt are drawn by the BROWSER, not the DOM, so the
+   applyI18n text-node walker can never reach them. These three declarations
+   shadow the globals for this whole IIFE, so every existing call site is
+   translated through t() with no change at the call sites themselves.
+   NB: the bodies must call window.* or they would recurse. */
+function alert(msg){ return window.alert(t(msg)); }
+function confirm(msg){ return window.confirm(t(msg)); }
+function prompt(msg, def){ return window.prompt(t(msg), def); }
+
+const CUSTOMERS =["Delton-TH","Dynamic-TH","Ifound-TH","CMK-TH","Starteam-TH","WUS-TH","VGT-TH","KCET-TH","KCEE-TH","E&E-TH","CI-TH","Fujikura-TH","Unimicron-TH","WTT-TH","Fineline-TH","Olympic-TH"];
 const MACHINE_TYPES = ["ES-6-2628-200","ES-6-2228-160","EXY-6-2628-200","HS-6-2528-160","X6-160","ES-1-2528-160-DH","EXY-1-2928-160","EXY-2228-160","EXY-2532-160","MXY-6"];
 const PRIORITIES = ["Rush","Standard"];
 const TYPES = ["Warranty","Purchase","Lacking Part","Quotation"];
@@ -5554,9 +5564,11 @@ function openSendReviewModal(){
   const isMobile = isAndroid || isIOS;
   let uploadedUrl = '';
   const enc = encodeURIComponent;
+  // This text ends up inside the OUTGOING EMAIL, never in a DOM text node, so
+  // applyI18n cannot reach it — translate at the call site via t().
   const composeBody = body => body + (uploadedUrl
-    ? '\n\n📎 ไฟล์ PDF: ' + uploadedUrl
-    : '\n\n[แนบไฟล์ PDF ก่อนส่ง — กด ⬇ Save PDF ในแอปเพื่อดาวน์โหลดไฟล์]');
+    ? '\n\n' + t('📎 ไฟล์ PDF:') + ' ' + uploadedUrl
+    : '\n\n' + t('[แนบไฟล์ PDF ก่อนส่ง — กด ⬇ Save PDF ในแอปเพื่อดาวน์โหลดไฟล์]'));
   const webComposeUrl = (subject, body)=>
     'https://outlook.office.com/mail/deeplink/compose?subject=' + enc(subject) + '&body=' + enc(composeBody(body));
   const openOutlookWeb = (win, subject, body)=>{
@@ -5817,6 +5829,11 @@ const TH_EN = {
   '🗑 ถังขยะ':'🗑 Recycle bin',
   'ไม่มีข้อมูล (0 แถว)':'No data (0 rows)',
   'แตะเพื่อดูรูปเต็ม':'Tap to view full image',
+  'แตะเพื่อเปลี่ยนรูป':'Tap to change the photo',
+  /* on/off STATE — deliberately distinct from 'เปิด'/'ปิด' (the Open/Close actions) */
+  'เปิดอยู่':'On',
+  'ปิดอยู่':'Off',
+  'ลิงก์ Flow (HTTP trigger URL)':'Flow URL (HTTP trigger URL)',
   'ดูรูปเต็ม':'View full image',
   'ยังไม่มีรูป':'No image yet',
   'ยังไม่มีคำค้นหาอื่น':'No other search words yet',
@@ -5929,7 +5946,246 @@ const TH_EN = {
   'กู้คืนข้อมูลแล้ว':'Data restored',
   'บันทึกชุดเบิกแล้ว':'Part set saved',
   'ลบชุดเบิกแล้ว':'Part set deleted',
-  'ไม่พบอะไหล่':'Part not found'
+  'ไม่พบอะไหล่':'Part not found',
+
+  /* ---- ☰ menu: section captions, items, tooltips ---- */
+  'คำสั่ง':'Commands',
+  'ฐานข้อมูล':'Database',
+  'ตั้งค่า':'Settings',
+  'ผู้ดูแลระบบ':'Admin',
+  'ซิงค์':'Sync',
+  'ภาษา':'Language',
+  'ออกจากระบบ':'Sign out',
+  'เลขที่เอกสาร':'Document number',
+  'เลขรันถัดไป':'Next running number',
+  'ประวัติการเบิกอะไหล่ทั้งหมด':'Full part usage history',
+  'แก้เลขที่เอกสาร':'Edit document number',
+  'แก้เลขที่เอกสาร — ใช้ได้เมื่อ Running number เปิดอยู่':'Edit document number — available while Running number is on',
+  'ล็อกอินเพื่อเปิด-ปิดฟังก์ชันขั้นสูง':'Sign in to turn advanced features on/off',
+  'ล็อกอินเพื่อเปิด-ปิดฟังก์ชันขั้นสูง (เช่น toolbar จัดข้อความ)':'Sign in to turn advanced features on/off (e.g. the format toolbar)',
+  'สร้างใบสั่งใหม่ — ข้อมูลที่ยังไม่บันทึกจะหายไป':'Create a new order — unsaved data will be lost',
+  'สร้างใบสั่งใหม่? ข้อมูลที่ยังไม่บันทึกจะหายไป':'Create a new order? Unsaved data will be lost.',
+  'เปิด-ปิด toolbar จัดข้อความ (B/I/U/สี) ในช่อง Description':'Turn the text format toolbar (B/I/U/colour) in Description on/off',
+  'เปิด-ปิดการรันเลขที่เอกสาร (TL{ปี}-{เลข}) — ตั้งค่าเป็นกลาง มีผลกับทุกคน':'Turn document numbering (TL{year}-{no}) on/off — shared setting, affects everyone',
+  'ตั้งค่า Power Automate — เปิด-ปิดส่งตรง, ลิงก์ Flow, อีเมลผู้รับ':'Power Automate settings — direct send, Flow URL, recipients',
+  '✏️ แก้เลข…':'✏️ Edit number…',
+
+  /* ---- Power User sign-in / feature toggles ---- */
+  'ออกจากระบบ Power User?':'Sign out of Power User?',
+  'ต้องเปิดผ่าน HTTPS (หรือ localhost) จึงจะล็อกอินได้':'Sign-in requires HTTPS (or localhost)',
+  'Username หรือ Password ไม่ถูกต้อง':'Incorrect username or password',
+  'เข้าสู่ระบบ Power User แล้ว — เปิด ☰ เพื่อตั้งค่า Format toolbar':'Signed in as Power User — open ☰ to configure the Format toolbar',
+  'เปิด Format toolbar แล้ว (มีผลกับทุกคน) — ลากคลุมข้อความในช่อง Description เพื่อใช้งาน':'Format toolbar on (affects everyone) — select text in Description to use it',
+  'ปิด Format toolbar แล้ว (มีผลกับทุกคน)':'Format toolbar off (affects everyone)',
+  'เปิด Running number แล้ว (มีผลกับทุกคน) — เลขจะรันอัตโนมัติทุกครั้งที่ Export':'Running number on (affects everyone) — a number is issued on every Export',
+  'ปิด Running number แล้ว (มีผลกับทุกคน)':'Running number off (affects everyone)',
+  'เลขไม่ถูกต้อง':'Invalid number',
+  'บันทึกการตั้งค่าไม่สำเร็จ (ออฟไลน์?) — ลองใหม่เมื่อออนไลน์':'Could not save settings (offline?) — try again when back online',
+
+  /* ---- ⚡ Power Automate settings page ---- */
+  'ส่งอีเมลตรงผ่าน Flow':'Send email directly via Flow',
+  'ส่งจริงพร้อมแนบไฟล์ PDF อัตโนมัติ — ไม่ต้องเปิดแอปอีเมล':'Really sends, with the PDF attached automatically — no mail app needed',
+  'กำลังตรวจสอบ...':'Checking...',
+  'กำลังทดสอบ...':'Testing...',
+  'กำลังบันทึก...':'Saving...',
+  '… กำลังทดสอบ flow':'… testing the flow',
+  'ทดสอบลิงก์':'Test link',
+  'บันทึกลิงก์':'Save link',
+  'ใส่ลิงก์ Flow ก่อน':'Enter the Flow URL first',
+  'ลิงก์ต้องขึ้นต้นด้วย https://':'The URL must start with https://',
+  'error: ลิงก์ต้องขึ้นต้นด้วย https://':'error: the URL must start with https://',
+  'ยังไม่มีลิงก์ Flow — วางลิงก์แล้วกดบันทึกก่อน':'No Flow URL yet — paste one and save it first',
+  '● เปิดใช้งานอยู่ — ✉ Send to email จะส่งจริงพร้อมไฟล์แนบ':'● Active — ✉ Send to email will really send, with the attachment',
+  '○ ปิดอยู่ — บันทึกลิงก์ไว้แล้ว กดสวิตช์เพื่อเปิดใช้งาน':'○ Off — the URL is saved; flip the switch to activate',
+  '▲ ยังไม่ได้ตั้งค่าลิงก์ Flow — วางลิงก์แล้วกดบันทึก':'▲ No Flow URL set — paste one and save',
+  '● ลิงก์ใช้ได้ — flow พร้อมทำงาน':'● URL works — the flow is ready',
+  '▲ flow ถูกระงับ (Suspended)':'▲ Flow is Suspended',
+  '▲ ทดสอบไม่ผ่าน':'▲ Test failed',
+  'ต้องมี Power Automate Premium license ก่อน flow จึงจะทำงาน':'The flow needs a Power Automate Premium licence to run',
+  'Flow ถูกระงับ (Suspended) — ต้องมี Power Automate Premium license ก่อนจึงจะเปิดใช้ได้':'Flow is Suspended — a Power Automate Premium licence is required before it can be enabled',
+  'เปิด Power Automate ส่งตรงแล้ว ✅ (มีผลกับทุกคน)':'Power Automate direct send is on ✅ (affects everyone)',
+  'ปิด Power Automate ส่งตรงแล้ว (มีผลกับทุกคน)':'Power Automate direct send is off (affects everyone)',
+  'บันทึกลิงก์ Flow แล้ว (มีผลกับทุกคน)':'Flow URL saved (affects everyone)',
+  'ล้างลิงก์ Flow แล้ว — กลับไปใช้ลิงก์เริ่มต้นในโค้ด':'Flow URL cleared — falling back to the built-in default',
+  'ซ่อนปุ่ม Send to email':'Hide the Send to email button',
+  'ซ่อนปุ่ม ✉ ในเมนู 📄 (ใช้เฉพาะ ⬇ Save PDF / 📤 Share)':'Hide ✉ in the 📄 menu (leaving only ⬇ Save PDF / 📤 Share)',
+  'แสดงปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)':'✉ Send to email is now shown (affects everyone)',
+  'ซ่อนปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)':'✉ Send to email is now hidden (affects everyone)',
+
+  /* ---- 👥 email recipients ---- */
+  '👥 จัดการอีเมลผู้รับ':'👥 Manage email recipients',
+  'จัดการอีเมลผู้รับ':'Manage email recipients',
+  'รายชื่อ To/CC ที่ใช้ตอนส่งตรงผ่าน Flow':'The To/CC list used when sending directly via Flow',
+  'อีเมลจะถูกส่งถึงทุกคนในรายชื่อนี้โดยอัตโนมัติ — To คือผู้รับหลัก, CC คือสำเนาถึง (แก้ไขได้เฉพาะ Power User)':'Email goes to everyone on this list automatically — To is the main recipient, CC is copied in (Power User only)',
+  'ยังไม่มีรายชื่อที่บันทึกไว้':'No saved recipients yet',
+  'ประเภทผู้รับ':'Recipient type',
+  'To — ผู้รับหลัก':'To — main recipient',
+  'CC — สำเนาถึง':'CC — copied in',
+  '＋ เพิ่มรายชื่อ':'＋ Add recipient',
+  'ชื่อ':'Name',
+  'เช่น Phutthiphong':'e.g. Phutthiphong',
+  'อีเมล *':'Email *',
+  'กรุณาใส่อีเมลให้ถูกต้อง':'Please enter a valid email address',
+  'ออกจากรายชื่อที่บันทึกไว้?':'Remove from the saved recipients?',
+
+  /* ---- 📋 Data Base viewer: tabs, search, column headers ---- */
+  'รุ่นเครื่อง':'Machine type',
+  'หมายเลขเครื่อง':'Machine No',
+  'ลูกค้า':'Customer',
+  'รายละเอียด':'Description',
+  'คำค้นหา':'Search words',
+  'URL รูปภาพ':'Image URL',
+  'รายการเครื่องจักร':'Machine list',
+  'รายการอะไหล่':'Part list',
+  'รายการชุดเบิก':'Part set list',
+  'ชื่อชุด':'Set name',
+  'พาร์ท':'Parts',
+  'พาร์ทหลัก':'Main part',
+  'ค้นหาเครื่อง... (หมายเลข, รุ่น, ลูกค้า)':'Search machines... (No, type, customer)',
+  'ค้นหาอะไหล่... (Article No, ชื่อ)':'Search parts... (Article No, name)',
+  'ค้นหาชุดเบิก...':'Search part sets...',
+  'ค้นหา...':'Search...',
+  'ล้าง':'Clear',
+  'เลือกจากรายการ':'Pick from the list',
+  'ไม่มีข้อมูล':'No data',
+  'ไม่พบข้อมูล':'Nothing found',
+  'กด ✎ เพื่อแก้ไขเครื่องจักร · แสดง':'Tap ✎ to edit a machine · showing',
+  'แตะรูปเพื่อดูเต็ม · กด ✎ เพื่อแก้ไขอะไหล่ · แสดง':'Tap a photo to enlarge · tap ✎ to edit a part · showing',
+  'ชุดพาร์ทที่ต้องเบิกด้วยกัน · ⭐ = พาร์ทหลัก · แสดง':'Parts requisitioned together · ⭐ = main part · showing',
+  'อะไหล่ที่ถูกลบ (สำรองไว้) · กด "กู้คืน" เพื่อนำกลับเข้าฐานข้อมูล':'Deleted parts (backed up) · tap "Restore" to put one back',
+  'กู้คืน':'Restore',
+  'ยังไม่ได้ใส่ LOOKUP_API_URL ในไฟล์':'LOOKUP_API_URL has not been set in the file',
+  'ซ่อมรูปอัตโนมัติแล้ว':'Images repaired automatically',
+  'รายการ':'items',
+  'ใช้กับ':'Used on',
+  'เปลี่ยน':'Change',
+
+  /* ---- add / edit machine ---- */
+  'แก้ไขเครื่องจักร':'Edit machine',
+  'ไม่พบเครื่อง':'Machine not found',
+  'กรุณากรอก Machine No':'Please enter a Machine No',
+  'กรุณาลงชื่อผู้แก้ไขก่อน':'Please sign your name first',
+  'กรุณาลงชื่อผู้แก้ไขก่อน (ในหน้าแก้ไข)':'Please sign your name first (on the edit page)',
+  'กรุณาลงชื่อผู้แก้ไขก่อนบันทึก':'Please sign your name before saving',
+  'กรุณาพิมพ์ชื่อผู้แก้ไข':'Please type the editor name',
+  'บันทึกการแก้ไขเครื่องแล้ว':'Machine changes saved',
+
+  /* ---- add / edit part, trash, restore ---- */
+  'กรุณากรอก Article No. หรือ Part Name':'Please enter an Article No. or Part Name',
+  'ต้องมี Article No. เพื่อบันทึกรูปภาพหรือคำค้นหา':'An Article No. is required to save a photo or search words',
+  'รูปที่แนบยังไม่ถูกบันทึก':'The attached photo has not been saved',
+  'ปิดโดยไม่บันทึกใช่หรือไม่? (ต้องกด “บันทึกอะไหล่” รูปจึงจะขึ้นในหน้าอะไหล่)':'Close without saving? (you must tap “Save part” for the photo to appear on the part page)',
+  'รูปที่เปลี่ยนยังไม่ถูกบันทึก':'The replaced photo has not been saved',
+  'ปิดโดยไม่บันทึกใช่หรือไม่? (ต้องกด “บันทึกการแก้ไข” รูปจึงจะถูกอัปโหลดและแสดงในหน้าอะไหล่)':'Close without saving? (you must tap “Save changes” for the photo to upload and appear on the part page)',
+  'แนบรูปแล้ว (กด “บันทึกการแก้ไข” เพื่ออัปโหลดแทนที่รูปเดิม)':'Photo attached (tap “Save changes” to upload it over the old one)',
+  'ย้ายอะไหล่ไปถังขยะแล้ว · กู้คืนได้ในแท็บ “ถังขยะ”':'Part moved to the trash · restore it from the “Trash” tab',
+  'บันทึกการแก้ไขแล้ว · สำรองข้อมูลเดิมไว้':'Changes saved · the previous data was backed up',
+  'บันทึกการแก้ไขแล้ว':'Changes saved',
+  'กู้คืนอะไหล่นี้กลับเข้าฐานข้อมูล?':'Restore this part to the database?',
+  'กู้คืนข้อมูลอะไหล่กลับเป็นค่าที่สำรองไว้นี้?':'Restore this part to the backed-up values?',
+  'อัปโหลดไม่สำเร็จ (ไม่ได้ URL กลับมา)':'Upload failed (no URL returned)',
+  'ไม่ได้รับ URL กลับมา':'No URL was returned',
+  'ลองกดบันทึกอีกครั้ง หรือกด "ลบรูป" เพื่อบันทึกโดยไม่เปลี่ยนรูป':'Try saving again, or tap "Remove photo" to save without changing it',
+
+  /* ---- companion (part) sets ---- */
+  'กรุณาตั้งชื่อชุด':'Please name the set',
+  'กรุณาเพิ่มพาร์ทอย่างน้อย 1 รายการ':'Please add at least one part',
+  'ลบชุดเบิกนี้?':'Delete this part set?',
+
+  /* ---- ⏳ pending parts queue ---- */
+  'มี Article No แล้ว → กดบันทึกเข้า Data Base · ยังไม่มีก็กดบันทึกเก็บรูป/ชื่อไว้ในคิวรออัพเดทได้ (ใส่รหัสทีหลัง)':'Have an Article No? → save straight into the Data Base · if not, save the photo/name to the pending queue and add the code later',
+  'Article No (ใส่ทีหลังได้)':'Article No (can be added later)',
+  'เช่น 46694 · เว้นว่างได้':'e.g. 46694 · may be left blank',
+  'บันทึกไว้ในคิวรออัพเดทแล้ว (ยังไม่มีรหัส)':'Saved to the pending queue (no code yet)',
+  'ดึงรูป + ข้อมูลจากคิวรอเติมรหัสให้อัตโนมัติ':'Auto-filled the photo and details from the pending queue',
+  'ไม่บันทึก: รายการนี้เพิ่งถูกลบไปเมื่อไม่นาน (ภายใน 7 วัน) ถ้าต้องการเพิ่มใหม่จริงๆ รอเกิน 7 วันแล้วลองอีกครั้ง':'Not saved: this entry was deleted recently (within 7 days). To re-add it, wait until 7 days have passed and try again.',
+  'เพิ่มรูปแล้ว ✓':'Photo added ✓',
+  'แตะเพื่อเพิ่มรูป':'Tap to add a photo',
+
+  /* ---- 📊 usage log ---- */
+  '📊 ประวัติการเบิกทั้งหมด':'📊 Full usage history',
+  'ประวัติการเบิกอะไหล่':'Part usage history',
+  '✎ แก้ไขรายการประวัติ':'✎ Edit history entry',
+  'แก้ไขข้อมูลประวัติการเบิกรายการนี้ (แก้เฉพาะประวัติ ไม่กระทบ Data Base)':'Edit this usage-history entry (history only — the Data Base is untouched)',
+  'ค้นหา... (ชื่อพาร์ท, ลูกค้า, รุ่น, Article No)':'Search... (part name, customer, type, Article No)',
+  'ใส่รหัสหรือชื่ออะไหล่ก่อน จึงจะดูประวัติการเบิกได้':'Enter an Article No or part name first to view its usage history',
+  'ดูประวัติการเบิก: พาร์ทนี้เคยเบิกให้ลูกค้า/เครื่องรุ่นไหน':'View usage history: which customers / machine types this part went to',
+  'ผู้บันทึก':'Recorded by',
+  'จัดการ':'Actions',
+  'จำนวน':'Qty',
+  'วันที่':'Date',
+  'ประเภท':'Type',
+  'เครื่อง':'Machine',
+  'หน่วย':'Unit',
+  'หมายเหตุ':'Note',
+  'ชุดเบิก':'Part set',
+  'ไม่มีข้อมูลให้ Export':'Nothing to export',
+  'ลบรายการแล้ว':'Entry deleted',
+  'ลบไม่สำเร็จ':'Delete failed',
+  'บันทึกไม่สำเร็จ':'Save failed',
+
+  /* ---- format toolbar + image cropper ---- */
+  'ตัวหนา':'Bold',
+  'ตัวเอียง':'Italic',
+  'ขีดเส้นใต้':'Underline',
+  'สีตัวอักษร':'Text colour',
+  'ครอป (ปรับอิสระ)':'Crop (free-form)',
+  'เลือกจุดที่ต้องการเก็บไว้':'Choose the area to keep',
+
+  /* ---- deploy / authorize hints (appended after an error) ---- */
+  '→ ต้อง Deploy Code.gs ใหม่':'→ Code.gs must be redeployed',
+  '→ deploy Code.gs ใหม่':'→ redeploy Code.gs',
+  '→ ต้อง Deploy Code.gs ใหม่ก่อน':'→ Code.gs must be redeployed first',
+  '→ ต้อง Deploy Code.gs ใหม่ (มี saveCompanionSet)':'→ Code.gs must be redeployed (for saveCompanionSet)',
+  '→ ต้อง Deploy Code.gs ใหม่ (มี softDeletePart)':'→ Code.gs must be redeployed (for softDeletePart)',
+  '→ ต้อง Deploy Code.gs ใหม่ (มี updatePart)':'→ Code.gs must be redeployed (for updatePart)',
+  '→ ต้อง Deploy Code.gs ใหม่ (ยังไม่มี deletePendingPart)':'→ Code.gs must be redeployed (deletePendingPart is missing)',
+  '→ ต้อง Deploy Code.gs ใหม่ (ยังไม่มี getPartUsage)':'→ Code.gs must be redeployed (getPartUsage is missing)',
+  '→ ต้อง Authorize Apps Script ให้เข้าถึง Drive: เปิด Apps Script Editor → Run "uploadImage" → Review Permissions → Allow':'→ Apps Script needs Drive access: open the Apps Script Editor → Run "uploadImage" → Review Permissions → Allow',
+  '→ ตรวจสอบ IMAGE_FOLDER_ID ใน Code.gs':'→ Check IMAGE_FOLDER_ID in Code.gs',
+  '→ ตรวจสอบการเชื่อมต่ออินเทอร์เน็ต':'→ Check the internet connection',
+  'ไม่มีอินเทอร์เน็ต — รูปจะอัปโหลดอัตโนมัติเมื่อเชื่อมต่อใหม่':'No internet — the photo will upload automatically once reconnected',
+  'รูปขึ้น Drive แล้ว ✓ แต่บันทึก URL ลงชีตไม่สำเร็จ → ต้อง Deploy Code.gs ใหม่ (มี setImageURL)':'Photo reached Drive ✓ but saving the URL to the sheet failed → Code.gs must be redeployed (for setImageURL)',
+
+  /* ---- PDF / draft / share ---- */
+  'ลบ Draft นี้ถาวร แน่ใจหรือไม่?':'Permanently delete this draft — are you sure?',
+  'ไม่พบไลบรารี jsPDF (jspdf.jsPDF undefined)':'jsPDF library not found (jspdf.jsPDF undefined)',
+  'ไม่พบไลบรารี html2canvas':'html2canvas library not found',
+  'แชท/แอปอื่นใดก็ได้':'chat or any other app',
+  'เบราว์เซอร์ไม่มีระบบแชร์':'This browser has no share support',
+  'เบราว์เซอร์นี้แชร์ไฟล์ไม่ได้':'This browser cannot share files',
+  'แชร์แล้ว ✓':'Shared ✓',
+  'แชร์แล้ว ✓ คัดลอกข้อความไว้ให้แล้ว — วางในแชทได้เลย':'Shared ✓ the message is on the clipboard — just paste it into the chat',
+  'การแชร์ครั้งก่อนยังค้างอยู่ — รอสักครู่แล้วลองใหม่':'The previous share is still pending — wait a moment and try again',
+  '— กด “Save PDF” เพื่อดาวน์โหลดแล้วส่งต่อเอง':'— tap “Save PDF” to download it and send it yourself',
+
+  /* ---- ✉ send to email ---- */
+  'ตรวจทานก่อนส่งอีเมล':'Review before sending',
+  'หัวข้อ':'Subject',
+  'เนื้อหา':'Body',
+  'ส่งอีเมล':'Send email',
+  '🟦 ส่งเข้า Outlook':'🟦 Send to Outlook',
+  '🟦 เปิด Outlook ส่งเมล':'🟦 Open Outlook to send',
+  '⚡ ระบบจะส่งอีเมลออกทันทีพร้อมไฟล์แนบเมื่อกด “ส่งอีเมล” — ผู้รับดึงจากสมุดรายชื่อ':'⚡ Tapping “Send email” sends immediately with the attachment — recipients come from the address book',
+  'กดปุ่มเดียว → เปิด Outlook พร้อมหัวข้อ + เนื้อหา + ลิงก์ไฟล์ PDF · ช่อง “ถึง” เว้นว่างให้กรอกเองใน Outlook':'One tap → opens Outlook with the subject, body and PDF link · the “To” field is left blank to fill in inside Outlook',
+  'กำลังเปิด Outlook...':'Opening Outlook...',
+  'กำลังเปิดแอป Outlook...':'Opening the Outlook app...',
+  'กำลังส่ง...':'Sending...',
+  'ไม่พบไฟล์ PDF — กลับไปกด 📄 เพื่อสร้างใหม่':'PDF not found — tap 📄 again to rebuild it',
+  'โหมด ⚡ ต้องมีผู้รับ (To) — เพิ่มที่ ☰ → 👥 จัดการอีเมลผู้รับ':'⚡ mode needs a recipient (To) — add one under ☰ → 👥 Manage email recipients',
+  'Flow ถูกระงับอีกครั้ง (license?) — ให้ Power User ปิด ⚡ แล้วใช้แบบลิงก์แทน':'The flow is Suspended again (licence?) — have a Power User turn ⚡ off and use the link mode instead',
+  'ส่งอีเมลแล้ว ✓ (แนบ PDF อัตโนมัติ)':'Email sent ✓ (PDF attached automatically)',
+  'เปิด Outlook แล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่งใน Outlook':'Outlook opened (the PDF link is in the body) — add recipients and send from Outlook',
+  'เปิด Outlook แล้ว ✓ (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่ง':'Outlook opened ✓ (the PDF link is in the body) — add recipients and send',
+  'กำลังเปิดแอป Outlook — ลิงก์ไฟล์อยู่ในเนื้อหา (ถ้าไม่มีแอปจะเปิด Outlook เว็บ)':'Opening the Outlook app — the file link is in the body (falls back to Outlook web if the app is missing)',
+  'อัพโหลดแล้ว แต่เปิดลิงก์สาธารณะไม่ได้ — ผู้รับอาจต้องขอสิทธิ์เข้าถึงไฟล์':'Uploaded, but the link could not be made public — recipients may have to request access',
+  'ไฟล์พร้อมแล้ว ✓ — กดปุ่มอีกครั้งเพื่อเปิด Outlook':'File ready ✓ — tap again to open Outlook',
+  'อัพโหลดไม่สำเร็จ — กดปุ่มอีกครั้งเพื่อเปิด Outlook แล้วแนบไฟล์เอง':'Upload failed — tap again to open Outlook and attach the file yourself',
+  '— หรือกด ⬇ Save PDF แล้วแนบเอง':'— or tap ⬇ Save PDF and attach it yourself',
+  ') · แนบไฟล์เองด้วย ⬇ Save PDF':') · attach the file yourself with ⬇ Save PDF',
+  ') · กด ⬇ Save PDF แล้วแนบเอง':') · tap ⬇ Save PDF and attach it yourself',
+  '📎 ไฟล์ PDF:':'📎 PDF file:',
+  '[แนบไฟล์ PDF ก่อนส่ง — กด ⬇ Save PDF ในแอปเพื่อดาวน์โหลดไฟล์]':'[Attach the PDF before sending — tap ⬇ Save PDF in the app to download it]'
 };
 
 /* Patterns for strings with interpolated data. Anchored so a translated result
@@ -5957,7 +6213,52 @@ const TH_EN_RULES = [
   [/^จำนวน (.+)$/, (m,p1)=>'Qty ' + p1.replace(' · ชุด: ', ' · set: ')],
   [/^เพิ่มเครื่องแล้ว: (.*)$/, 'Machine added: $1'],
   [/^เพิ่มอะไหล่แล้ว: (.*)$/, 'Part added: $1'],
-  [/^บันทึกเข้า Data Base แล้ว: (.*)$/, 'Saved to Data Base: $1']
+  [/^บันทึกเข้า Data Base แล้ว: (.*)$/, 'Saved to Data Base: $1'],
+
+  /* --- failures that carry an error message --- */
+  [/^อัปโหลดไม่สำเร็จ: (.*)$/, 'Upload failed: $1'],
+  [/^ลบไม่สำเร็จ: (.*?)( \(ต้องมีอินเทอร์เน็ตถึงจะลบได้\))?$/,
+     (m,p1,p2)=>'Delete failed: ' + p1 + (p2 ? ' (deleting requires an internet connection)' : '')],
+  [/^กู้คืนไม่สำเร็จ: (.*)$/, 'Restore failed: $1'],
+  [/^เพิ่มไม่สำเร็จ: (.*)$/, 'Add failed: $1'],
+  [/^ส่งไม่สำเร็จ: (.*)$/, 'Send failed: $1'],
+  [/^แชร์ถูกปฏิเสธ: (.*)$/, 'Share refused: $1'],
+  [/^บันทึกรูปลงชีตไม่สำเร็จ: (.*)$/, 'Saving the photo to the sheet failed: $1'],
+  [/^บันทึก URL ลงชีตไม่สำเร็จ: (.*)$/, 'Saving the URL to the sheet failed: $1'],
+  [/^ไม่สามารถโหลดรูปได้: (.*)$/, 'Could not load the image: $1'],
+  [/^Export PDF ไม่สำเร็จ: (.*)$/, 'PDF export failed: $1'],
+  [/^อัปโหลดรูปไม่สำเร็จ — ยังไม่ได้บันทึก: (.*)$/, 'Photo upload failed — nothing saved: $1'],
+  [/^เปิด Outlook ไม่สำเร็จ: (.*)$/, 'Could not open Outlook: $1'],
+
+  /* --- counts and numbers --- */
+  [/^เพิ่มพาร์ทแนะนำ (\d+) รายการ \(เกิน (\d+) รายการ ข้าม (\d+) รายการ\)$/,
+     'Added $1 suggested part(s) (over the $2-item limit, skipped $3)'],
+  [/^เพิ่มพาร์ทแนะนำ (\d+) รายการ$/, 'Added $1 suggested part(s)'],
+  [/^เพิ่มไม่ได้: เกิน (\d+) รายการแล้ว$/, 'Cannot add: already at the $1-item limit'],
+  [/^ซ่อมรูปอัตโนมัติแล้ว (\d+) รายการ$/, 'Repaired $1 image(s) automatically'],
+  [/^Export เสร็จแล้ว \((\d+) รายการ\)$/, 'Export complete ($1 rows)'],
+  [/^(\d+) รายการ \(พิมพ์เพื่อค้นหา\)$/, '$1 items (type to search)'],
+  [/^…และอีก (\d+) รายการ$/, '…and $1 more'],
+  [/^อัพเดทเข้า DB แล้ว: #(.+)$/, 'Updated into the DB: #$1'],
+  [/^ตั้งเลขรันถัดไปเป็น (.+) แล้ว \(มีผลกับทุกคน\)$/, 'Next running number set to $1 (affects everyone)'],
+  [/^ใช้รหัส (.+) ที่มีอยู่แล้วสำหรับ "(.*)"$/, 'Using existing code $1 for "$2"'],
+  [/^✏️ แก้เลขใบนี้ \((.+)\)$/, '✏️ Edit this document’s number ($1)'],
+  [/^✏️ แก้เลขรันถัดไป \((.+)\)$/, '✏️ Edit the next running number ($1)'],
+
+  /* --- prompts (native dialogs, translated via t()) --- */
+  [/^ตั้งเลขรันถัดไป \(เฉพาะตัวเลข\) — มีผลกับทุกคน$/, 'Set the next running number (digits only) — affects everyone'],
+  [/^รูปแบบ: (.+)$/, 'Format: $1'],
+  [/^แก้เลขรันของ Draft นี้ \(เฉพาะตัวเลข — ไม่กระทบเลขกลาง\)$/, 'Edit this draft’s number (digits only — the shared counter is untouched)'],
+  [/^ลบ (.+) ออกจากรายชื่อที่บันทึกไว้\?$/, 'Remove $1 from the saved recipients?'],
+
+  /* --- ⚡ flow test --- */
+  [/^ทดสอบ flow ไม่ผ่าน \((.+)\) — ยังไม่เปิดใช้$/, 'Flow test failed ($1) — not enabled'],
+
+  /* --- Outlook + upload combinations --- */
+  [/^กำลังเปิดแอป Outlook — อัพโหลดไฟล์ไม่สำเร็จ \((.+)\) · แนบไฟล์เองด้วย ⬇ Save PDF$/,
+     'Opening the Outlook app — the upload failed ($1) · attach the file yourself with ⬇ Save PDF'],
+  [/^เปิด Outlook แล้ว — แต่อัพโหลดไฟล์ไม่สำเร็จ \((.+)\) · กด ⬇ Save PDF แล้วแนบเอง$/,
+     'Outlook opened — but the upload failed ($1) · tap ⬇ Save PDF and attach it yourself']
 ];
 
 const _i18nTextOrig = new WeakMap();   // Text node -> original Thai string
@@ -5972,6 +6273,18 @@ function translateTh(s){
     if(re.test(key)) return s.replace(key, key.replace(re, rep));
   }
   return null;
+}
+/* Translate a string for a NATIVE dialog (alert / confirm / prompt). Those are
+   drawn by the browser, not the DOM, so applyI18n can never reach them — the
+   call site has to translate up front. Multi-line messages are translated line
+   by line, since each line is its own dictionary entry. In TH mode, or with no
+   entry, the original comes back unchanged. */
+function t(s){
+  if(uiLang !== 'en') return s;
+  return String(s == null ? '' : s).split('\n').map(line=>{
+    const hit = translateTh(line);
+    return hit === null ? line : hit;
+  }).join('\n');
 }
 function i18nSkip(el){
   if(!el) return false;
@@ -6119,7 +6432,10 @@ function refreshPowerMenuUI(){
   document.querySelectorAll('.tm-admin').forEach(el=>{ el.style.display = on ? '' : 'none'; });
   setSw('swFmt', fmtToolbarOn());
   setSw('swRun', runNumberEnabled());
-  setTxt('paMenuVal', paSendOn() ? 'เปิด' : 'ปิด');
+  // NB: 'เปิดอยู่'/'ปิดอยู่' (is on / is off), NOT 'เปิด'/'ปิด' — those two are
+  // already dictionary keys for the ACTIONS Open/Close, so a bare 'ปิด' here
+  // rendered as "Close" in EN instead of "Off".
+  setTxt('paMenuVal', paSendOn() ? 'เปิดอยู่' : 'ปิดอยู่');
   try{ renderRunNumber(); }catch(e){}   // keeps the chip + the ✏️ edit menu item in sync
 }
 
