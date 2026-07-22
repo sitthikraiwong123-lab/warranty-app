@@ -4578,7 +4578,7 @@ function renderItems(){
         <div class="fld-stack"><span class="fld-cap">Description</span><div class="rich-field f-itemdesc" contenteditable="true" data-idx="${idx}" data-placeholder="e.g. damaged at left side">${it.itemDescHtml ? sanitizeRichHtml(it.itemDescHtml) : escHtml(it.itemDesc)}</div></div>
         <div class="alias-add-row" data-idx="${idx}"></div>
         <div class="item-photo fld-stack">
-          <span class="fld-cap">รูปอะไหล่ <span class="item-photo-status" id="itemPhotoStatus${idx}"></span></span>
+          <span class="fld-cap">Part photo <span class="item-photo-status" id="itemPhotoStatus${idx}"></span></span>
           <div class="photo-canvas" id="itemPhotoCanvas${idx}"></div>
           <div class="item-photo-actions">
             <label class="btn-file" id="itemPhotoAddLabel${idx}"><span class="btn-ico">📷</span> <span class="ipa-text">เพิ่มรูป</span><input type="file" accept="image/*" id="itemPhotoFile${idx}" hidden></label>
@@ -5765,6 +5765,10 @@ const TH_EN = {
   'กำลังเชื่อมต่อฐานข้อมูล...':'Connecting to database...',
   'กำลังซิงค์ฐานข้อมูล...':'Syncing database...',
   'ที่อยู่ออกบิล / จัดส่ง (ค่าเริ่มต้น แก้ไขได้)':'Invoice / shipping address (defaults, editable)',
+  '💾 บันทึกเป็นค่าเริ่มต้น':'💾 Save as default',
+  'บันทึกเป็นค่าเริ่มต้นแล้ว ✓':'Saved as default ✓',
+  'บันทึกไม่สำเร็จ (ออฟไลน์?)':'Save failed (offline?)',
+  'บันทึกรูปอะไหล่เรียบร้อย':'Part photo saved',
   // Section heading is hardcoded English ("Parts & Machines (maximum 8 items)")
   // in both languages, matching the English field labels around it — no entry needed.
   // "＋ Add item" is hardcoded English in both languages — no entry needed.
@@ -5782,7 +5786,8 @@ const TH_EN = {
   'ลบ':'Delete',
   'ลบรายการ':'Delete item',
   '🔒 พาร์ทแนะนำ (แก้ Qty ได้)':'🔒 Suggested part (Qty editable)',
-  'รูปอะไหล่':'Part photo',
+  // "Part photo" field label is hardcoded English in both languages, matching
+  // its sibling labels (Machine No / Article No / Part Name / Qty / …).
   'เพิ่มรูป':'Add photo',
   'เปลี่ยนรูป':'Change photo',
   'ลบรูป':'Remove photo',
