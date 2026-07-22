@@ -815,7 +815,6 @@ table.pphoto tr td:last-child{ border-right:none !important; }
     <div class="top-menu" id="topMenu" role="menu" aria-labelledby="btnMenu">
       <!-- ใบสั่ง -->
       <div class="tm-label">คำสั่ง</div>
-      <button class="tm-item" id="btnNew" role="menuitem"><span class="tm-ic">＋</span><span class="tm-txt">ใหม่</span></button>
       <button class="tm-item" id="btnHistory" role="menuitem"><span class="tm-ic">📝</span><span class="tm-txt">Draft</span></button>
       <div class="tm-sep" role="separator"></div>
       <div class="tm-label">ฐานข้อมูล</div>
@@ -832,6 +831,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
       <!-- ผู้ดูแลระบบ (โผล่เมื่อล็อกอิน Power User) -->
       <div class="tm-sep tm-admin" role="separator" style="display:none;"></div>
       <div class="tm-label tm-admin" style="display:none;">ผู้ดูแลระบบ</div>
+      <button class="tm-item tm-admin" id="btnNew" role="menuitem" style="display:none;" title="สร้างใบสั่งใหม่ — ข้อมูลที่ยังไม่บันทึกจะหายไป"><span class="tm-ic">＋</span><span class="tm-txt">New</span></button>
       <button class="tm-item tm-admin" id="btnFmtToggle" role="menuitem" style="display:none;" title="เปิด-ปิด toolbar จัดข้อความ (B/I/U/สี) ในช่อง Description"><span class="tm-ic">🛠</span><span class="tm-txt">Format toolbar</span><span class="tm-sw" id="swFmt"></span></button>
       <button class="tm-item tm-admin" id="btnRunNumToggle" role="menuitem" style="display:none;" title="เปิด-ปิดการรันเลขที่เอกสาร (TL{ปี}-{เลข}) — ตั้งค่าเป็นกลาง มีผลกับทุกคน"><span class="tm-ic">🔢</span><span class="tm-txt">Running number</span><span class="tm-sw" id="swRun"></span></button>
       <button class="tm-item tm-admin" id="btnPowerAutomate" role="menuitem" style="display:none;" title="ตั้งค่า Power Automate — เปิด-ปิดส่งตรง, ลิงก์ Flow, อีเมลผู้รับ"><span class="tm-ic">⚡</span><span class="tm-txt">Power Automate</span><span class="tm-val" id="paMenuVal">ปิด</span><span class="tm-chev">›</span></button>
@@ -5756,7 +5756,6 @@ const TH_EN = {
   // ☰ top bar
   'เมนู':'Menu',
   '⟳ ซิงค์':'⟳ Sync',
-  '＋ ใหม่':'＋ New',
   'ซิงค์ฐานข้อมูล Machine/Part':'Sync the Machine/Part database',
   'ดูข้อมูล Database ที่ซิงค์มา':'View the synced Database',
   'สลับภาษา UI — บิล PDF เป็นภาษาอังกฤษเสมอ':'Switch UI language — the PDF bill is always English',
