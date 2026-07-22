@@ -373,11 +373,19 @@ input,select,textarea{font-family:inherit;font-size:14px;}
    that pushState and unbalance _modalDepth. It dismisses via Esc / tap-outside
    / picking an item instead. */
 .btn-menu{font-size:16px;line-height:1;}
-.top-menu{position:absolute;top:100%;right:14px;margin-top:8px;z-index:60;
-  background:#fff;border:1px solid var(--border);border-radius:13px;
-  box-shadow:0 12px 32px rgba(0,0,0,.17);min-width:236px;padding:7px;
-  display:none;flex-direction:column;gap:1px;}
-.top-menu.open{display:flex;}
+/* Same slide-in shell as .history-panel (the Draft panel), so ☰ and 📝 Draft
+   open the same way. Kept in sync with .history-panel below. */
+.top-menu{
+  position:fixed;top:0;right:0;height:100%;width:min(380px,100%);background:#fff;
+  box-shadow:-4px 0 20px rgba(0,0,0,.15);transform:translateX(100%);transition:transform .25s;
+  z-index:80;display:flex;flex-direction:column;
+}
+.top-menu.open{transform:translateX(0);}
+.tm-head{display:flex;justify-content:space-between;align-items:center;padding:14px;border-bottom:1px solid var(--border);}
+.tm-head h2{margin:0;font-size:15px;color:var(--red);}
+.tm-head button{background:none;border:none;font-size:20px;color:var(--gray);}
+/* the items scroll; the header stays put */
+.tm-body{overflow-y:auto;flex:1;padding:7px;display:flex;flex-direction:column;gap:1px;}
 /* section caption — groups the menu into คำสั่ง / ฐานข้อมูล / ตั้งค่า / ผู้ดูแลระบบ */
 .tm-label{font-size:10px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
   color:#9a9a9e;padding:9px 12px 5px;user-select:none;}
@@ -629,7 +637,8 @@ html[lang="en"] .photo-canvas:empty::after{content:'Tap to add photo';} /* CSS-g
 .empty-hint{color:var(--gray);font-size:13px;text-align:center;padding:30px 10px;}
 
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:75;opacity:0;pointer-events:none;transition:opacity .2s;}
-.history-panel.open ~ .overlay{opacity:1;pointer-events:auto;}
+.history-panel.open ~ .overlay,
+.top-menu.open ~ .overlay{opacity:1;pointer-events:auto;}
 
 .pdf-modal{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;
   background:rgba(0,0,0,.55);padding:16px;box-sizing:border-box;}
@@ -812,30 +821,6 @@ table.pphoto tr td:last-child{ border-right:none !important; }
   </div>
   <div class="topbar-actions">
     <button class="btn btn-menu" id="btnMenu" aria-label="เมนู" aria-haspopup="true" aria-expanded="false" aria-controls="topMenu">☰</button>
-    <div class="top-menu" id="topMenu" role="menu" aria-labelledby="btnMenu">
-      <!-- ใบสั่ง -->
-      <div class="tm-label">คำสั่ง</div>
-      <button class="tm-item" id="btnHistory" role="menuitem"><span class="tm-ic">📝</span><span class="tm-txt">Draft</span></button>
-      <div class="tm-sep" role="separator"></div>
-      <div class="tm-label">ฐานข้อมูล</div>
-      <!-- ฐานข้อมูล -->
-      <button class="tm-item" id="btnViewDb" role="menuitem" title="ดูข้อมูล Database ที่ซิงค์มา"><span class="tm-ic">📋</span><span class="tm-txt">Data Base</span></button>
-      <button class="tm-item" id="btnViewLog" role="menuitem" title="ประวัติการเบิกอะไหล่ทั้งหมด"><span class="tm-ic">📊</span><span class="tm-txt">Log</span></button>
-      <button class="tm-item" id="lookupSyncRefresh" role="menuitem" title="ซิงค์ฐานข้อมูล Machine/Part"><span class="tm-ic">⟳</span><span class="tm-txt">ซิงค์</span></button>
-      <div class="tm-sep" role="separator"></div>
-      <!-- ตั้งค่า -->
-      <div class="tm-label">ตั้งค่า</div>
-      <button class="tm-item" id="btnLang" role="menuitem" title="สลับภาษา UI — บิล PDF เป็นภาษาอังกฤษเสมอ"><span class="tm-ic">🌐</span><span class="tm-txt" id="btnLangTxt">ภาษา</span><span class="tm-val" id="btnLangVal">TH</span></button>
-      <button class="tm-item" id="btnRunNumEdit" role="menuitem" style="display:none;" title="แก้เลขที่เอกสาร — ใช้ได้เมื่อ Running number เปิดอยู่"><span class="tm-ic">✏️</span><span class="tm-txt">แก้เลขที่เอกสาร</span></button>
-      <button class="tm-item" id="btnPowerUser" role="menuitem" title="ล็อกอินเพื่อเปิด-ปิดฟังก์ชันขั้นสูง"><span class="tm-ic">🔑</span><span class="tm-txt" id="btnPowerUserTxt">Power User</span><span class="tm-val" id="btnPowerUserVal"></span></button>
-      <!-- ผู้ดูแลระบบ (โผล่เมื่อล็อกอิน Power User) -->
-      <div class="tm-sep tm-admin" role="separator" style="display:none;"></div>
-      <div class="tm-label tm-admin" style="display:none;">ผู้ดูแลระบบ</div>
-      <button class="tm-item tm-admin" id="btnNew" role="menuitem" style="display:none;" title="สร้างใบสั่งใหม่ — ข้อมูลที่ยังไม่บันทึกจะหายไป"><span class="tm-ic">＋</span><span class="tm-txt">New</span></button>
-      <button class="tm-item tm-admin" id="btnFmtToggle" role="menuitem" style="display:none;" title="เปิด-ปิด toolbar จัดข้อความ (B/I/U/สี) ในช่อง Description"><span class="tm-ic">🛠</span><span class="tm-txt">Format toolbar</span><span class="tm-sw" id="swFmt"></span></button>
-      <button class="tm-item tm-admin" id="btnRunNumToggle" role="menuitem" style="display:none;" title="เปิด-ปิดการรันเลขที่เอกสาร (TL{ปี}-{เลข}) — ตั้งค่าเป็นกลาง มีผลกับทุกคน"><span class="tm-ic">🔢</span><span class="tm-txt">Running number</span><span class="tm-sw" id="swRun"></span></button>
-      <button class="tm-item tm-admin" id="btnPowerAutomate" role="menuitem" style="display:none;" title="ตั้งค่า Power Automate — เปิด-ปิดส่งตรง, ลิงก์ Flow, อีเมลผู้รับ"><span class="tm-ic">⚡</span><span class="tm-txt">Power Automate</span><span class="tm-val" id="paMenuVal">ปิดอยู่</span><span class="tm-chev">›</span></button>
-    </div>
   </div>
 </div>
 
@@ -896,6 +881,42 @@ table.pphoto tr td:last-child{ border-right:none !important; }
   <div class="history-list" id="historyList"></div>
 </div>
 
+
+<!-- The ☰ menu is a right-side slide-in panel with the same shell as the Draft
+     panel, and it must live HERE, outside .topbar: .topbar has z-index:50, which
+     creates a stacking context a child can never escape, so a menu nested inside
+     it would always paint under .overlay. Being a sibling of .overlay also lets
+     the existing "panel.open ~ .overlay" dimming selector apply to it. -->
+<div class="top-menu" id="topMenu" role="menu" aria-labelledby="btnMenu">
+  <div class="tm-head">
+    <h2>Menu</h2>
+    <button id="btnCloseMenu" aria-label="ปิดเมนู">&times;</button>
+  </div>
+  <div class="tm-body">
+        <!-- ใบสั่ง -->
+        <div class="tm-label">คำสั่ง</div>
+        <button class="tm-item" id="btnHistory" role="menuitem"><span class="tm-ic">📝</span><span class="tm-txt">Draft</span></button>
+        <div class="tm-sep" role="separator"></div>
+        <div class="tm-label">ฐานข้อมูล</div>
+        <!-- ฐานข้อมูล -->
+        <button class="tm-item" id="btnViewDb" role="menuitem" title="ดูข้อมูล Database ที่ซิงค์มา"><span class="tm-ic">📋</span><span class="tm-txt">Data Base</span></button>
+        <button class="tm-item" id="btnViewLog" role="menuitem" title="ประวัติการเบิกอะไหล่ทั้งหมด"><span class="tm-ic">📊</span><span class="tm-txt">Log</span></button>
+        <button class="tm-item" id="lookupSyncRefresh" role="menuitem" title="ซิงค์ฐานข้อมูล Machine/Part"><span class="tm-ic">⟳</span><span class="tm-txt">ซิงค์</span></button>
+        <div class="tm-sep" role="separator"></div>
+        <!-- ตั้งค่า -->
+        <div class="tm-label">ตั้งค่า</div>
+        <button class="tm-item" id="btnLang" role="menuitem" title="สลับภาษา UI — บิล PDF เป็นภาษาอังกฤษเสมอ"><span class="tm-ic">🌐</span><span class="tm-txt" id="btnLangTxt">ภาษา</span><span class="tm-val" id="btnLangVal">TH</span></button>
+        <button class="tm-item" id="btnRunNumEdit" role="menuitem" style="display:none;" title="แก้เลขที่เอกสาร — ใช้ได้เมื่อ Running number เปิดอยู่"><span class="tm-ic">✏️</span><span class="tm-txt">แก้เลขที่เอกสาร</span></button>
+        <button class="tm-item" id="btnPowerUser" role="menuitem" title="ล็อกอินเพื่อเปิด-ปิดฟังก์ชันขั้นสูง"><span class="tm-ic">🔑</span><span class="tm-txt" id="btnPowerUserTxt">Power User</span><span class="tm-val" id="btnPowerUserVal"></span></button>
+        <!-- ผู้ดูแลระบบ (โผล่เมื่อล็อกอิน Power User) -->
+        <div class="tm-sep tm-admin" role="separator" style="display:none;"></div>
+        <div class="tm-label tm-admin" style="display:none;">ผู้ดูแลระบบ</div>
+        <button class="tm-item tm-admin" id="btnNew" role="menuitem" style="display:none;" title="สร้างใบสั่งใหม่ — ข้อมูลที่ยังไม่บันทึกจะหายไป"><span class="tm-ic">＋</span><span class="tm-txt">New</span></button>
+        <button class="tm-item tm-admin" id="btnFmtToggle" role="menuitem" style="display:none;" title="เปิด-ปิด toolbar จัดข้อความ (B/I/U/สี) ในช่อง Description"><span class="tm-ic">🛠</span><span class="tm-txt">Format toolbar</span><span class="tm-sw" id="swFmt"></span></button>
+        <button class="tm-item tm-admin" id="btnRunNumToggle" role="menuitem" style="display:none;" title="เปิด-ปิดการรันเลขที่เอกสาร (TL{ปี}-{เลข}) — ตั้งค่าเป็นกลาง มีผลกับทุกคน"><span class="tm-ic">🔢</span><span class="tm-txt">Running number</span><span class="tm-sw" id="swRun"></span></button>
+        <button class="tm-item tm-admin" id="btnPowerAutomate" role="menuitem" style="display:none;" title="ตั้งค่า Power Automate — เปิด-ปิดส่งตรง, ลิงก์ Flow, อีเมลผู้รับ"><span class="tm-ic">⚡</span><span class="tm-txt">Power Automate</span><span class="tm-val" id="paMenuVal">ปิดอยู่</span><span class="tm-chev">›</span></button>
+  </div>
+</div>
 <div class="overlay"></div>
 
 <script>
@@ -5767,6 +5788,7 @@ try{ uiLang = localStorage.getItem(UI_LANG_KEY) === 'en' ? 'en' : 'th'; }catch(e
 const TH_EN = {
   // ☰ top bar
   'เมนู':'Menu',
+  'ปิดเมนู':'Close menu',
   '⟳ ซิงค์':'⟳ Sync',
   'ซิงค์ฐานข้อมูล Machine/Part':'Sync the Machine/Part database',
   'ดูข้อมูล Database ที่ซิงค์มา':'View the synced Database',
@@ -6390,6 +6412,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
   const m = document.getElementById('topMenu');
   if(!b || !m) return;
   b.onclick = toggleTopMenu;
+  const x = document.getElementById('btnCloseMenu');
+  if(x) x.onclick = closeTopMenu;
   // Capture: hide the menu BEFORE the item's own onclick opens its modal.
   // The format-toolbar toggle is exempt — it flips in place, so keeping the
   // menu open lets the user see the state change.
