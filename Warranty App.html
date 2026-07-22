@@ -482,6 +482,11 @@ details.addr-details{margin-top:4px;}
 details.addr-details summary{cursor:pointer;font-size:12.5px;color:var(--gray);font-weight:600;margin-bottom:8px;}
 .addr-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;}
 @media (max-width:640px){.addr-grid{grid-template-columns:1fr;}}
+.addr-actions{display:flex;align-items:center;gap:8px;margin-top:8px;}
+.addr-save-btn{font-size:12px;font-weight:600;padding:5px 12px;border:1px solid var(--border,#d0d5dd);border-radius:7px;background:#fff;color:var(--gray,#667085);cursor:pointer;transition:.15s;}
+.addr-save-btn:hover{border-color:#98a2b3;color:#344054;}
+.addr-save-btn.dirty{border-color:#2563eb;color:#2563eb;background:#eff6ff;}
+.addr-save-hint{font-size:11.5px;color:var(--gray,#667085);}
 
 .select-custom{display:flex;flex-direction:column;gap:6px;}
 .select-custom .custom-input{margin-top:2px;}
@@ -853,6 +858,10 @@ table.pphoto tr td:last-child{ border-right:none !important; }
       <div class="addr-grid">
         <label>Invoice address<textarea id="invoiceAddress"></textarea></label>
         <label>Shipping address<textarea id="shippingAddress"></textarea></label>
+      </div>
+      <div class="addr-actions">
+        <button type="button" id="addrSaveDefaultBtn" class="addr-save-btn">💾 บันทึกเป็นค่าเริ่มต้น</button>
+        <span class="addr-save-hint" id="addrSaveHint"></span>
       </div>
     </details>
   </div>
@@ -1510,8 +1519,10 @@ function defaultOrder(){
     updatedAt: Date.now(),
     priority: 'Rush',
     type: 'Warranty',
-    invoiceAddress: DEFAULT_ADDRESS,
-    shippingAddress: DEFAULT_ADDRESS,
+    // Prefill from the remembered default (saved via 💾 บันทึกเป็นค่าเริ่มต้น);
+    // fall back to the built-in company address when none has been saved yet.
+    invoiceAddress: rememberedInvoiceAddress(),
+    shippingAddress: rememberedShippingAddress(),
     customer: '',
     exportNo: null,   // running document number (e.g. TL2026-001); assigned on first export, then reused
     items: [ {machineNo:'', machineType:'', articleNo:'', description:'', qty:1, qtyUnit:'pcs', itemDesc:'', image:null} ]
@@ -1617,11 +1628,28 @@ let lookupOnline = navigator.onLine;
 // hideSendEmail defaults TRUE: ✉ Send to email is HIDDEN out of the box and a
 // Power User reveals it from the ⚡ Power Automate page (that switch is the only
 // place it's controlled). Only ⬇ Save PDF / 📤 Share show until then.
-const DEFAULT_APP_SETTINGS = { fmtToolbar:false, runNumberEnabled:false, paSend:false, paUrl:'', hideSendEmail:true, runPrefix:'TL', runYear:(new Date()).getFullYear(), runNext:1 };
+const DEFAULT_APP_SETTINGS = { fmtToolbar:false, runNumberEnabled:false, paSend:false, paUrl:'', hideSendEmail:true, defaultInvoiceAddress:'', defaultShippingAddress:'', runPrefix:'TL', runYear:(new Date()).getFullYear(), runNext:1 };
 let appSettings = Object.assign({}, DEFAULT_APP_SETTINGS);
 function fmtToolbarOn(){ return !!appSettings.fmtToolbar; }
 function paSendOn(){ return !!appSettings.paSend; }
 function hideSendEmailOn(){ return !!appSettings.hideSendEmail; }
+/* Remembered default addresses: a Save-change control stores the current
+   invoice/shipping address into appSettings so every NEW order starts from it.
+   Empty ⇒ fall back to the built-in company address. */
+function rememberedInvoiceAddress(){ const v = (appSettings.defaultInvoiceAddress||'').trim(); return v || DEFAULT_ADDRESS; }
+function rememberedShippingAddress(){ const v = (appSettings.defaultShippingAddress||'').trim(); return v || DEFAULT_ADDRESS; }
+/* Highlight the "บันทึกเป็นค่าเริ่มต้น" button only when the current order's
+   address differs from what is already remembered — so the user can tell at a
+   glance whether pressing it would actually change anything. */
+function refreshAddrSaveBtn(){
+  try{
+    const btn = document.getElementById('addrSaveDefaultBtn');
+    if(!btn || typeof order === 'undefined') return;
+    const dirty = ((order.invoiceAddress||'') !== rememberedInvoiceAddress())
+               || ((order.shippingAddress||'') !== rememberedShippingAddress());
+    btn.classList.toggle('dirty', dirty);
+  }catch(e){}
+}
 /* Flow URL is editable in-app (⚡ settings page) and shared via appSettings;
    the built-in constant is only the fallback when nothing has been saved. */
 function paSendUrl(){ return String(appSettings.paUrl || '').trim() || POWER_AUTOMATE_SEND_URL; }
@@ -4027,9 +4055,26 @@ function buildFilterCombo(opts){
 function bindTopFields(){
   const $ = id=>document.getElementById(id);
   $('invoiceAddress').value = order.invoiceAddress;
-  $('invoiceAddress').oninput = e=>{ order.invoiceAddress = e.target.value; };
+  $('invoiceAddress').oninput = e=>{ order.invoiceAddress = e.target.value; refreshAddrSaveBtn(); };
   $('shippingAddress').value = order.shippingAddress;
-  $('shippingAddress').oninput = e=>{ order.shippingAddress = e.target.value; };
+  $('shippingAddress').oninput = e=>{ order.shippingAddress = e.target.value; refreshAddrSaveBtn(); };
+  const addrBtn = $('addrSaveDefaultBtn');
+  if(addrBtn){
+    addrBtn.onclick = async ()=>{
+      addrBtn.disabled = true;
+      const ok = await saveAppSettings({
+        defaultInvoiceAddress: order.invoiceAddress || '',
+        defaultShippingAddress: order.shippingAddress || ''
+      });
+      addrBtn.disabled = false;
+      const hint = $('addrSaveHint');
+      if(ok){ if(hint) hint.textContent = 'บันทึกเป็นค่าเริ่มต้นแล้ว ✓'; }
+      else  { if(hint) hint.textContent = 'บันทึกไม่สำเร็จ (ออฟไลน์?)'; }
+      refreshAddrSaveBtn();
+      setTimeout(()=>{ if(hint) hint.textContent = ''; }, 2600);
+    };
+  }
+  refreshAddrSaveBtn();
 
   const prioWrap = $('priorityWrap'); prioWrap.innerHTML='';
   const prioSel = document.createElement('select');
