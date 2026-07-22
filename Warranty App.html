@@ -869,7 +869,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
   <div class="card">
     <h2>Parts &amp; Machines (maximum 8 items)</h2>
     <div id="itemsList"></div>
-    <button class="btn btn-add-row" id="btnAddRow"><span class="btn-ico">＋</span> เพิ่มรายการเครื่อง / อะไหล่</button>
+    <button class="btn btn-add-row" id="btnAddRow"><span class="btn-ico">＋</span> Add item</button>
   </div>
 
   <div class="card" id="previewCard" style="display:none;">
@@ -3501,8 +3501,8 @@ function addCompanionRows(srcIdx, comps, setName){
     added++;
   });
   renderItems();
-  if(added) flashStatus('เพิ่มพาร์ทแนะนำ ' + added + ' รายการ' + (skipped ? ' (เกิน '+MAX_ITEMS+' แถว ข้าม '+skipped+' รายการ)' : ''));
-  else if(skipped) flashStatus('เพิ่มไม่ได้: เกิน '+MAX_ITEMS+' แถวแล้ว');
+  if(added) flashStatus('เพิ่มพาร์ทแนะนำ ' + added + ' รายการ' + (skipped ? ' (เกิน '+MAX_ITEMS+' รายการ ข้าม '+skipped+' รายการ)' : ''));
+  else if(skipped) flashStatus('เพิ่มไม่ได้: เกิน '+MAX_ITEMS+' รายการแล้ว');
 }
 
 // Lightweight yes/no modal listing the companion parts. Resolves true/false.
@@ -3515,7 +3515,7 @@ function showCompanionPrompt(trigger, comps){
       <div class="companion-dialog">
         <div class="cmp-head">พาร์ทที่แนะนำให้เบิกคู่กับ #${escHtml(trigger)}</div>
         <div class="cmp-body">${rows}</div>
-        <div class="cmp-note">รายการเหล่านี้จะถูกเพิ่มเป็นแถวใหม่ (ล็อกแก้ไข) โดยใช้ Machine No/Type เดียวกัน</div>
+        <div class="cmp-note">รายการเหล่านี้จะถูกเพิ่มเป็นรายการใหม่ (ล็อกแก้ไข) โดยใช้ Machine No/Type เดียวกัน</div>
         <div class="cmp-actions">
           <button type="button" class="btn cmp-no-btn">ไม่</button>
           <button type="button" class="btn btn-primary cmp-yes-btn">ใช่ เพิ่มให้เลย</button>
@@ -4566,7 +4566,7 @@ function renderItems(){
         </div>`;
     } else {
       row.innerHTML = `
-      <div class="item-row-head">แถวที่ ${idx+1} ${order.items.length>1?'<button type="button" class="btn-del-row" data-idx="'+idx+'">ลบแถว</button>':''}</div>
+      <div class="item-row-head">รายการที่ ${idx+1} ${order.items.length>1?'<button type="button" class="btn-del-row" data-idx="'+idx+'">ลบรายการ</button>':''}</div>
       <div class="item-grid">
         <label class="fld-inline"><span class="fld-cap">Machine No*</span><div class="ac-wrap"><input type="text" class="f-machineNo" data-idx="${idx}" value="${escAttr(it.machineNo)}" autocomplete="off"><div class="ac-list" id="machineAc${idx}"></div></div></label>
         <label class="fld-inline"><span class="fld-cap">Machine Type*</span><div class="mt-wrap" data-idx="${idx}"></div></label>
@@ -5767,7 +5767,7 @@ const TH_EN = {
   'ที่อยู่ออกบิล / จัดส่ง (ค่าเริ่มต้น แก้ไขได้)':'Invoice / shipping address (defaults, editable)',
   // Section heading is hardcoded English ("Parts & Machines (maximum 8 items)")
   // in both languages, matching the English field labels around it — no entry needed.
-  'เพิ่มรายการเครื่อง / อะไหล่':'Add machine / part row',
+  // "＋ Add item" is hardcoded English in both languages — no entry needed.
   'PDF พร้อมแล้ว':'PDF is ready',
   'เปิดดู PDF':'Open PDF',
   'ดาวน์โหลด PDF':'Download PDF',
@@ -5780,7 +5780,7 @@ const TH_EN = {
   '- เลือก/พิมพ์รุ่นเครื่อง -':'- Select / type machine type -',
   // item rows
   'ลบ':'Delete',
-  'ลบแถว':'Delete row',
+  'ลบรายการ':'Delete item',
   '🔒 พาร์ทแนะนำ (แก้ Qty ได้)':'🔒 Suggested part (Qty editable)',
   'รูปอะไหล่':'Part photo',
   'เพิ่มรูป':'Add photo',
@@ -5801,7 +5801,7 @@ const TH_EN = {
   // companion (suggested-set) prompt
   'ไม่':'No',
   'ใช่ เพิ่มให้เลย':'Yes, add them',
-  'รายการเหล่านี้จะถูกเพิ่มเป็นแถวใหม่ (ล็อกแก้ไข) โดยใช้ Machine No/Type เดียวกัน':'These will be added as new rows (locked) using the same Machine No/Type',
+  'รายการเหล่านี้จะถูกเพิ่มเป็นรายการใหม่ (ล็อกแก้ไข) โดยใช้ Machine No/Type เดียวกัน':'These will be added as new items (locked) using the same Machine No/Type',
   // Draft panel
   '(ไม่มีลูกค้า)':'(no customer)',
   'เปิด':'Open',
@@ -5932,7 +5932,7 @@ const TH_EN = {
    can never re-match (the observer would otherwise loop). Replacement may be a
    string or a function, exactly as String.replace accepts. */
 const TH_EN_RULES = [
-  [/^แถวที่ (\d+)/, 'Row $1'],
+  [/^รายการที่ (\d+)/, 'Item $1'],
   [/^⏳ รออัพเดทเข้า DB \((\d+)\)$/, '⏳ Pending DB update ($1)'],
   [/^เครื่อง \((\d+)\)$/, 'Machines ($1)'],
   [/^อะไหล่ \((\d+)\)$/, 'Parts ($1)'],
