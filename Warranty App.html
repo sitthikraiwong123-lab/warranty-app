@@ -3879,6 +3879,32 @@ function onMachineNoEntered(idx, machineNo){
 }
 /* Shared check: is this alias text already known for this part (either as the
    canonical Description or an existing Suggestion word)? If not, record it. */
+/* Is this exact name already known ANYWHERE in the system — as another part's
+   Description or suggestion word, or as a pending "รอเติมรหัส" entry? Returns the
+   owner {kind:'db'|'pending', articleNo, description} or null. Used to stop a real
+   part name from being silently turned into a search word (คำเดา) for a different
+   code. `exceptArticleNo` skips the part we're recording for, so its own names
+   don't count as a conflict. */
+function findNameOwner(name, exceptArticleNo){
+  const n = String(name||'').trim().toLowerCase();
+  if(!n) return null;
+  const except = String(exceptArticleNo||'').trim().toLowerCase();
+  for(const p of (lookupCache.parts||[])){
+    const art = String(p.ArticleNo||'').trim();
+    if(art.toLowerCase() === except) continue;
+    const names = [p.Description].concat(
+      Object.keys(p).filter(k => /suggestion\s*word/i.test(k)).map(k => p[k])
+    ).filter(Boolean).map(s => String(s).trim().toLowerCase());
+    if(names.includes(n)) return { kind:'db', articleNo:art, description:String(p.Description||'') };
+  }
+  const pend = (window._getPendingPartsCache ? window._getPendingPartsCache() : []) || [];
+  for(const r of pend){
+    if(String(r.RequisitionName||'').trim().toLowerCase() === n)
+      return { kind:'pending', pendingId:r.PendingId, description:String(r.RequisitionName||'') };
+  }
+  return null;
+}
+
 function recordPartAliasIfNew(articleNo, aliasText){
   articleNo = String(articleNo||'').trim();
   aliasText = String(aliasText||'').trim();
@@ -3889,6 +3915,9 @@ function recordPartAliasIfNew(articleNo, aliasText){
     Object.keys(match).filter(k => /suggestion\s*word/i.test(k)).map(k => match[k])
   ).filter(Boolean).map(s => String(s).trim().toLowerCase());
   if(knownNames.includes(aliasText.toLowerCase())) return false;
+  // Never turn an existing part name (another coded part, or a pending entry)
+  // into a search word for THIS code — that name already belongs to a real part.
+  if(findNameOwner(aliasText, articleNo)) return false;
   const key = 'alias:' + articleNo.toLowerCase() + ':' + aliasText.toLowerCase();
   if(submittedThisSession.has(key)) return false;
   submittedThisSession.add(key);
@@ -3913,7 +3942,15 @@ function onArticleNoEntered(idx, articleNo){
       renderItems();
       if(canonical) flashField(`.f-description[data-idx="${idx}"]`);
     } else if(canonical && currentDesc.toLowerCase() !== canonical.toLowerCase()){
-      recordPartAliasIfNew(articleNo, currentDesc);
+      // Only learn the typed text as a search word if it isn't already a real
+      // part name somewhere. If it is, warn instead of polluting another part.
+      const owner = findNameOwner(currentDesc, articleNo);
+      if(owner){
+        const where = owner.kind==='pending' ? 'ในคิวรอเติมรหัส' : ' #'+owner.articleNo;
+        flashStatus(`⚠ "${currentDesc}" เป็นชื่ออะไหล่${where} อยู่แล้ว — ไม่ได้บันทึกเป็นคำค้นหาของ #${articleNo} (ถ้าเป็นอะไหล่ใหม่ ให้ลบรหัสออกก่อน)`, 7000);
+      } else {
+        recordPartAliasIfNew(articleNo, currentDesc);
+      }
       order.items[idx].description = canonical;
       order.items[idx].descriptionHtml = '';
       renderItems();
@@ -3948,7 +3985,14 @@ function renderAliasAddRow(idx){
     const inp = container.querySelector('.alias-add-input');
     inp.focus();
     const confirmAdd = ()=>{
-      const added = recordPartAliasIfNew(articleNo, inp.value);
+      const val = String(inp.value||'').trim();
+      const owner = val ? findNameOwner(val, articleNo) : null;
+      if(owner){
+        const where = owner.kind==='pending' ? 'ในคิวรอเติมรหัส' : ` #${owner.articleNo} (${owner.description||'-'})`;
+        alert(`"${val}" เป็นชื่ออะไหล่${where} อยู่แล้ว\nใช้เป็นคำค้นหาของ #${articleNo} ไม่ได้ — ถ้าเป็นอะไหล่ใหม่จริง ให้เพิ่มเป็นอะไหล่ใหม่แทน`);
+        return;
+      }
+      const added = recordPartAliasIfNew(articleNo, val);
       if(added){ container.innerHTML = `<span class="alias-add-done">บันทึกชื่อเรียกใหม่แล้ว ✓</span>`; setTimeout(()=>renderAliasAddRow(idx), 1500); }
       else renderAliasAddRow(idx);
     };
@@ -4007,6 +4051,15 @@ function buildComboBox(baseOptions, value, onChange, placeholder){
   wrap.appendChild(inp); wrap.appendChild(dl);
   wrap.setValue = (v)=>{ inp.value = v || ''; };
   return wrap;
+}
+
+/* Distinct values of a machine field straight from the synced DB (MC List tab),
+   sorted. The order form's Customer / Machine Type dropdowns use ONLY this — the
+   choices are real data, never a hard-coded guess list. */
+function dbMachineFieldOptions(key){
+  const seen = new Set();
+  (lookupCache.machines||[]).forEach(r=>{ const v = String(r[key]==null?'':r[key]).trim(); if(v) seen.add(v); });
+  return [...seen].sort((a,b)=>a.localeCompare(b));
 }
 
 /* Reusable filter combobox: a rounded search field (type to filter) + a row of
@@ -4146,7 +4199,7 @@ function bindTopFields(){
   typeWrap.appendChild(typeSel);
 
   const custWrap = $('customerWrap'); custWrap.innerHTML='';
-  custWrap.appendChild(buildComboBox(CUSTOMERS, order.customer, v=>{ order.customer = v; }, '- เลือกลูกค้า -'));
+  custWrap.appendChild(buildComboBox(dbMachineFieldOptions('CustomerName'), order.customer, v=>{ order.customer = v; }, '- เลือก/พิมพ์ลูกค้า -'));
 }
 
 /* Renders the PartUsage ledger rows. Shared so the ledger looks identical
@@ -4211,49 +4264,163 @@ function renderUsageRowsFull(rows, editable){
   </table></div></div>`;
 }
 
-/* Export a formatted Excel file. Builds a styled HTML table that Excel/Sheets
-   opens as a real worksheet — bold red header, banded rows, borders, a title
-   and an export-stamp — so the download looks tidy with zero libraries. Saved
-   as .xls with the MS-Excel MIME type. columns: [{key,label,fmt?,align?,width?}]. */
+/* ---- Minimal .xlsx writer (real OOXML, no libraries) ------------------------
+   A .xlsx is just a ZIP of XML parts. We build the parts, store them
+   uncompressed (ZIP "store" method needs only a CRC32), and download the ZIP.
+   Produces a tidy styled sheet: red bold header, thin borders, a title row and
+   an export stamp, column widths, and numeric cells where asked. Opens natively
+   in modern Excel / Google Sheets / LibreOffice. */
+function _crc32(bytes){
+  let t = _crc32.t;
+  if(!t){ t = _crc32.t = new Uint32Array(256);
+    for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = (c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; } }
+  let crc = 0xFFFFFFFF;
+  for(let i=0;i<bytes.length;i++) crc = (crc>>>8) ^ t[(crc ^ bytes[i]) & 0xFF];
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function _zipStore(files){
+  const enc = new TextEncoder();
+  const u16 = n => [n&0xFF,(n>>>8)&0xFF];
+  const u32 = n => [n&0xFF,(n>>>8)&0xFF,(n>>>16)&0xFF,(n>>>24)&0xFF];
+  const chunks = [], central = [];
+  let offset = 0;
+  files.forEach(f=>{
+    const name = enc.encode(f.name);
+    const data = (typeof f.data === 'string') ? enc.encode(f.data) : f.data;
+    const crc = _crc32(data);
+    const local = new Uint8Array([].concat(
+      u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
+      u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0)));
+    chunks.push(local, name, data);
+    central.push(new Uint8Array([].concat(
+      u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+      u32(crc), u32(data.length), u32(data.length),
+      u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset))), name);
+    offset += local.length + name.length + data.length;
+  });
+  const cdStart = offset;
+  let cdSize = 0;
+  central.forEach(c=>{ chunks.push(c); cdSize += c.length; });
+  chunks.push(new Uint8Array([].concat(
+    u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length),
+    u32(cdSize), u32(cdStart), u16(0))));
+  let total = 0; chunks.forEach(c=>total+=c.length);
+  const out = new Uint8Array(total); let p=0;
+  chunks.forEach(c=>{ out.set(c,p); p+=c.length; });
+  return out;
+}
+function buildXlsxBytes(rows, columns, sheetName, title){
+  const xe = s => String(s==null?'':s).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g,'')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const colLetter = n => { let s=''; n++; while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=(n-m-1)/26; } return s; };
+  const ncol = Math.max(1, columns.length);
+  sheetName = String(sheetName||'Sheet').replace(/[\\\/\?\*\[\]:]/g,' ').slice(0,31) || 'Sheet';
+
+  let colsXml = '<cols>';
+  columns.forEach((c,ci)=>{ const w = c.width ? Math.min(90,Math.max(6,Math.round(c.width/7))) : 14; colsXml += `<col min="${ci+1}" max="${ci+1}" width="${w}" customWidth="1"/>`; });
+  colsXml += '</cols>';
+
+  let rowsXml = '', rowNum = 1; const merges = [];
+  const cell = (ci, s, inner) => `<c r="${colLetter(ci)}${rowNum}" s="${s}"${inner}`;
+  if(title){
+    rowsXml += `<row r="${rowNum}"><c r="A${rowNum}" s="1" t="inlineStr"><is><t>${xe(title)}</t></is></c></row>`;
+    merges.push(`A${rowNum}:${colLetter(ncol-1)}${rowNum}`);
+    rowNum++;
+    rowsXml += `<row r="${rowNum}"><c r="A${rowNum}" s="5" t="inlineStr"><is><t>${xe('ส่งออกเมื่อ '+new Date().toLocaleString('th-TH')+' · รวม '+rows.length+' รายการ')}</t></is></c></row>`;
+    merges.push(`A${rowNum}:${colLetter(ncol-1)}${rowNum}`);
+    rowNum++;
+  }
+  let hc = '';
+  columns.forEach((c,ci)=>{ hc += `<c r="${colLetter(ci)}${rowNum}" s="2" t="inlineStr"><is><t>${xe(c.label||c.key)}</t></is></c>`; });
+  rowsXml += `<row r="${rowNum}">${hc}</row>`; rowNum++;
+  rows.forEach(r=>{
+    let rc = '';
+    columns.forEach((c,ci)=>{
+      let v = typeof c.fmt==='function' ? c.fmt(r) : r[c.key];
+      const ref = colLetter(ci)+rowNum;
+      const isNum = c.numeric && v!=='' && v!=null && isFinite(v);
+      if(isNum) rc += `<c r="${ref}" s="4"><v>${Number(v)}</v></c>`;
+      else rc += `<c r="${ref}" s="${c.align==='right'?4:3}" t="inlineStr"><is><t>${xe(v)}</t></is></c>`;
+    });
+    rowsXml += `<row r="${rowNum}">${rc}</row>`; rowNum++;
+  });
+
+  const sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    + colsXml + '<sheetData>' + rowsXml + '</sheetData>'
+    + (merges.length ? `<mergeCells count="${merges.length}">${merges.map(m=>`<mergeCell ref="${m}"/>`).join('')}</mergeCells>` : '')
+    + '</worksheet>';
+
+  const styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    + '<fonts count="4">'
+    + '<font><sz val="11"/><name val="Calibri"/></font>'
+    + '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>'
+    + '<font><b/><sz val="14"/><color rgb="FFE41D15"/><name val="Calibri"/></font>'
+    + '<font><sz val="9"/><color rgb="FF8A8A8A"/><name val="Calibri"/></font>'
+    + '</fonts>'
+    + '<fills count="3">'
+    + '<fill><patternFill patternType="none"/></fill>'
+    + '<fill><patternFill patternType="gray125"/></fill>'
+    + '<fill><patternFill patternType="solid"><fgColor rgb="FFE41D15"/><bgColor indexed="64"/></patternFill></fill>'
+    + '</fills>'
+    + '<borders count="2">'
+    + '<border><left/><right/><top/><bottom/><diagonal/></border>'
+    + '<border><left style="thin"><color rgb="FFD9D9D9"/></left><right style="thin"><color rgb="FFD9D9D9"/></right><top style="thin"><color rgb="FFD9D9D9"/></top><bottom style="thin"><color rgb="FFD9D9D9"/></bottom><diagonal/></border>'
+    + '</borders>'
+    + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+    + '<cellXfs count="6">'
+    + '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+    + '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+    + '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>'
+    + '<xf numFmtId="49" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>'
+    + '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="top"/></xf>'
+    + '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+    + '</cellXfs>'
+    + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+    + '</styleSheet>';
+
+  const files = [
+    { name:'[Content_Types].xml', data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+      + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+      + '<Default Extension="xml" ContentType="application/xml"/>'
+      + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+      + '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+      + '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+      + '</Types>' },
+    { name:'_rels/.rels', data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+      + '</Relationships>' },
+    { name:'xl/workbook.xml', data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+      + `<sheets><sheet name="${xe(sheetName)}" sheetId="1" r:id="rId1"/></sheets></workbook>` },
+    { name:'xl/_rels/workbook.xml.rels', data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+      + '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+      + '</Relationships>' },
+    { name:'xl/styles.xml', data:styles },
+    { name:'xl/worksheets/sheet1.xml', data:sheetXml },
+  ];
+  return _zipStore(files);
+}
+/* Public: download `rows` as a styled .xlsx. columns: [{key,label,fmt?,align?,width?,numeric?}]. */
 function downloadExcel(rows, columns, filename, title){
   if(!rows.length){ flashStatus('ไม่มีข้อมูลให้ Export'); return; }
-  const esc = v => String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const ncol = columns.length;
-  const thBase = 'background:#E41D15;color:#ffffff;font-weight:bold;border:1px solid #b71812;padding:7px 10px;text-align:left;mso-number-format:\\@;';
-  const th = columns.map(c=>{
-    const w = c.width ? 'width:'+c.width+'px;' : '';
-    return `<th style="${thBase}${w}">${esc(c.label||c.key)}</th>`;
-  }).join('');
-  const body = rows.map((r,i)=>{
-    const bg = i%2 ? 'background:#fdeceb;' : 'background:#ffffff;';
-    const tds = columns.map(c=>{
-      const val = typeof c.fmt==='function' ? c.fmt(r) : r[c.key];
-      const align = c.align ? 'text-align:'+c.align+';' : '';
-      return `<td style="border:1px solid #e2c9c8;padding:5px 10px;vertical-align:top;mso-number-format:\\@;${bg}${align}">${esc(val)}</td>`;
-    }).join('');
-    return '<tr>'+tds+'</tr>';
-  }).join('');
-  const titleRow = title
-    ? `<tr><td colspan="${ncol}" style="font-size:15pt;font-weight:bold;color:#E41D15;padding:6px 10px;">${esc(title)}</td></tr>` : '';
-  const stamp = `<tr><td colspan="${ncol}" style="font-size:9pt;color:#8a8a8a;padding:2px 10px;">ส่งออกเมื่อ ${esc(new Date().toLocaleString('th-TH'))} · รวม ${rows.length} รายการ</td></tr>`;
-  const sheetName = esc((title||filename||'Sheet').slice(0,28));
-  const html = '﻿<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">'
-    + '<head><meta charset="UTF-8">'
-    + '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>'
-    + '<x:Name>'+sheetName+'</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>'
-    + '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->'
-    + '<style>table{border-collapse:collapse;font-family:Calibri,Tahoma,sans-serif;font-size:11pt;}</style></head>'
-    + '<body><table border="0" cellspacing="0" cellpadding="0">'
-    + titleRow + stamp + '<tr><td></td></tr>'
-    + '<thead><tr>'+th+'</tr></thead><tbody>'+body+'</tbody>'
-    + '</table></body></html>';
-  const blob = new Blob([html], {type:'application/vnd.ms-excel;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = (filename||'export')+'.xls';
-  document.body.appendChild(a); a.click();
-  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
-  flashStatus('Export เสร็จแล้ว ('+rows.length+' รายการ)');
+  try{
+    const bytes = buildXlsxBytes(rows, columns, title||filename||'Sheet', title);
+    const blob = new Blob([bytes], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = (filename||'export')+'.xlsx';
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+    flashStatus('Export เสร็จแล้ว ('+rows.length+' รายการ)');
+  }catch(err){
+    flashStatus('Export ไม่สำเร็จ: '+String(err.message||err));
+  }
 }
 
 /* "ประวัติการเบิก" for one Article No — which customer / machine did this part
@@ -4385,7 +4552,7 @@ async function openLogModal(){
       {key:'Type',label:'ประเภท',width:80},
       {key:'Customer',label:'ลูกค้า',width:130},{key:'MachineType',label:'รุ่นเครื่อง',width:140},{key:'MachineNo',label:'หมายเลขเครื่อง',width:120},
       {key:'ArticleNo',label:'Article No',width:90},{key:'PartName',label:'ชื่ออะไหล่',width:200},
-      {key:'Qty',label:'จำนวน',width:60,align:'right'},{key:'Unit',label:'หน่วย',width:60},
+      {key:'Qty',label:'จำนวน',width:60,align:'right',numeric:true},{key:'Unit',label:'หน่วย',width:60},
       {key:'SetName',label:'ชุดเบิก',width:120},{key:'RecordedBy',label:'ผู้บันทึก',width:110},{key:'Note',label:'หมายเหตุ',width:180}
     ];
     downloadExcel(_filteredRows, cols, 'log-'+new Date().toISOString().slice(0,10), 'ประวัติการเบิกอะไหล่');
@@ -4719,7 +4886,7 @@ function renderItems(){
   });
   list.querySelectorAll('.mt-wrap').forEach(wrap=>{
     const idx = +wrap.dataset.idx;
-    wrap.appendChild(buildComboBox(MACHINE_TYPES, order.items[idx].machineType, v=>{ order.items[idx].machineType = v; }, '- เลือกรุ่นเครื่อง -'));
+    wrap.appendChild(buildComboBox(dbMachineFieldOptions('MachineType'), order.items[idx].machineType, v=>{ order.items[idx].machineType = v; }, '- เลือก/พิมพ์รุ่นเครื่อง -'));
   });
   list.querySelectorAll('.btn-del-row').forEach(btn=>btn.onclick = ()=>{
     order.items.splice(+btn.dataset.idx,1);
