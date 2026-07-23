@@ -3738,6 +3738,21 @@ function renderMachineSuggestions(ac, idx, query){
     el.onmousedown = ev=>{ ev.preventDefault(); selectMachineSuggestion(idx, results[i]); ac.classList.remove('show'); };
   });
 }
+/* Generic value dropdown for a plain text field (Customer / Machine Type). Shows
+   ALL options on focus, filters as you type, and looks exactly like the Machine
+   No list. onPick(value) fires on selection; free text stays allowed via the
+   field's own oninput. */
+function renderValueSuggestions(ac, inputEl, options, onPick){
+  const q = String(inputEl.value||'').trim().toLowerCase();
+  const opts = (options||[]).map(v=>String(v));
+  const list = q ? opts.filter(o=>o.toLowerCase().includes(q)) : opts;
+  if(!list.length){ ac.classList.remove('show'); ac.innerHTML=''; return; }
+  ac.innerHTML = list.slice(0,80).map((o,i)=>`<div class="ac-item" data-i="${i}"><div class="ac-main">${escHtml(o)}</div></div>`).join('');
+  ac.classList.add('show');
+  ac.querySelectorAll('.ac-item').forEach((el,i)=>{
+    el.onmousedown = ev=>{ ev.preventDefault(); onPick(list[i]); ac.classList.remove('show'); };
+  });
+}
 function selectMachineSuggestion(idx, m){
   order.items[idx].machineNo = String(m.MachineNumber || '');
   order.items[idx].machineType = m.MachineType || order.items[idx].machineType;
@@ -4244,8 +4259,14 @@ function bindTopFields(){
   typeSel.onchange = e=>{ order.type = e.target.value; };
   typeWrap.appendChild(typeSel);
 
-  const custWrap = $('customerWrap'); custWrap.innerHTML='';
-  custWrap.appendChild(buildSelectCombo(()=>dbMachineFieldOptions('CustomerName'), order.customer, v=>{ order.customer = v; }, '- เลือก/พิมพ์ลูกค้า -'));
+  const custWrap = $('customerWrap');
+  custWrap.innerHTML = `<div class="ac-wrap"><input type="text" class="f-customer" value="${escAttr(order.customer)}" autocomplete="off" placeholder="- เลือก/พิมพ์ลูกค้า -"><div class="ac-list" id="customerAc"></div></div>`;
+  const custInp = custWrap.querySelector('.f-customer');
+  const custAc = custWrap.querySelector('#customerAc');
+  const renderCust = ()=>renderValueSuggestions(custAc, custInp, dbMachineFieldOptions('CustomerName'), v=>{ order.customer = v; custInp.value = v; });
+  custInp.oninput = e=>{ order.customer = e.target.value; renderCust(); };
+  custInp.onfocus = renderCust;
+  custInp.onblur = ()=>setTimeout(()=>custAc.classList.remove('show'), 150);
 }
 
 /* Renders the PartUsage ledger rows. Shared so the ledger looks identical
@@ -4837,7 +4858,7 @@ function renderItems(){
       <div class="item-row-head">รายการที่ ${idx+1} ${order.items.length>1?'<button type="button" class="btn-del-row" data-idx="'+idx+'">ลบรายการ</button>':''}</div>
       <div class="item-grid">
         <label class="fld-inline"><span class="fld-cap">Machine No*</span><div class="ac-wrap"><input type="text" class="f-machineNo" data-idx="${idx}" value="${escAttr(it.machineNo)}" autocomplete="off"><div class="ac-list" id="machineAc${idx}"></div></div></label>
-        <label class="fld-inline"><span class="fld-cap">Machine Type*</span><div class="mt-wrap" data-idx="${idx}"></div></label>
+        <label class="fld-inline"><span class="fld-cap">Machine Type*</span><div class="ac-wrap mt-wrap" data-idx="${idx}"><input type="text" class="f-machineType" data-idx="${idx}" value="${escAttr(it.machineType)}" autocomplete="off" placeholder="- เลือก/พิมพ์รุ่นเครื่อง -"><div class="ac-list" id="machineTypeAc${idx}"></div></div></label>
         <div class="fld-inline"><span class="fld-cap">Article No</span><div class="ac-wrap"><input type="text" class="f-articleNo" data-idx="${idx}" value="${escAttr(it.articleNo)}" autocomplete="off"><div class="ac-list" id="partAc${idx}"></div></div><button type="button" class="btn-usage f-usage" data-idx="${idx}" title="ดูประวัติการเบิก: พาร์ทนี้เคยเบิกให้ลูกค้า/เครื่องรุ่นไหน" aria-label="ดูประวัติการเบิกของพาร์ทนี้"${String(it.articleNo||'').trim()?'':' disabled'}>👁</button></div>
         <div class="pname-qty-row">
           <label class="fld-stack pname-fld"><span class="fld-cap">Part Name</span><div class="ac-wrap"><div class="rich-field f-description" contenteditable="true" data-idx="${idx}">${it.descriptionHtml ? sanitizeRichHtml(it.descriptionHtml) : escHtml(it.description)}</div><div class="ac-list" id="descAc${idx}"></div></div></label>
@@ -4930,9 +4951,13 @@ function renderItems(){
       order.items[idx].itemDescHtml = html;
     });
   });
-  list.querySelectorAll('.mt-wrap').forEach(wrap=>{
-    const idx = +wrap.dataset.idx;
-    wrap.appendChild(buildSelectCombo(()=>dbMachineFieldOptions('MachineType'), order.items[idx].machineType, v=>{ order.items[idx].machineType = v; }, '- เลือก/พิมพ์รุ่นเครื่อง -'));
+  list.querySelectorAll('.f-machineType').forEach(el=>{
+    const idx = +el.dataset.idx;
+    const ac = document.getElementById('machineTypeAc'+idx);
+    const render = ()=>renderValueSuggestions(ac, el, dbMachineFieldOptions('MachineType'), v=>{ order.items[idx].machineType = v; el.value = v; });
+    el.oninput = e=>{ order.items[idx].machineType = e.target.value; render(); };
+    el.onfocus = render;
+    el.onblur = ()=>setTimeout(()=>ac.classList.remove('show'), 150);
   });
   list.querySelectorAll('.btn-del-row').forEach(btn=>btn.onclick = ()=>{
     order.items.splice(+btn.dataset.idx,1);
