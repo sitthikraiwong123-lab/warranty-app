@@ -146,8 +146,12 @@ input,select,textarea{font-family:inherit;font-size:14px;}
 .cbx-opt{padding:10px 12px;font-size:13.5px;border-radius:8px;cursor:pointer;color:var(--dark);display:flex;align-items:center;gap:8px;transition:background .12s;}
 .cbx-opt:active,.cbx-opt.hi{background:#fef2f2;color:var(--red);}
 .cbx-opt.sel{background:#fff5f4;color:var(--red);font-weight:700;}
+/* form-field variant: matches the app's standard <input>/<select> look */
 .cbx.cbx-plain{margin-bottom:0;}
-.cbx.cbx-plain .cbx-field{border-radius:9px;}
+.cbx.cbx-plain .cbx-field{border:1px solid var(--border);border-radius:7px;padding:0 6px 0 10px;}
+.cbx.cbx-plain .cbx-input{padding:9px 0;font-size:14px;}
+.cbx.cbx-plain .cbx-input::placeholder{color:#b9b9b9;}
+.cbx.cbx-plain .cbx-caret{color:var(--gray);font-size:12px;width:24px;height:24px;}
 .cbx-opt .cbx-tag{font-size:10px;font-weight:700;color:#98a2b3;margin-left:auto;flex-shrink:0;}
 .cbx-group-label{position:sticky;top:0;background:#faf5f5;color:#b0454a;font-size:10.5px;font-weight:800;padding:6px 12px 4px;letter-spacing:.3px;}
 .cbx-cat{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 12px;font-size:14px;font-weight:600;border-radius:8px;cursor:pointer;color:var(--dark);transition:background .12s;}
@@ -4070,7 +4074,9 @@ function dbMachineFieldOptions(key){
    typing needed), filters as you type, and still allows free text. Shares the
    .cbx look used by the search boxes so it matches the rest of the app. */
 function buildSelectCombo(options, value, onChange, placeholder){
-  const opts = (options||[]).map(v=>String(v));
+  // options can be an array OR a function → resolved every time the menu opens,
+  // so the list fills in once the DB sync finishes (it may be empty at build time).
+  const getOpts = typeof options === 'function' ? options : ()=>options;
   const wrap = document.createElement('div'); wrap.className = 'cbx cbx-plain';
   const field = document.createElement('div'); field.className = 'cbx-field';
   const inp = document.createElement('input');
@@ -4081,10 +4087,11 @@ function buildSelectCombo(options, value, onChange, placeholder){
   const menu = document.createElement('div'); menu.className = 'cbx-menu';
   wrap.append(field, menu);
   function renderMenu(){
+    const opts = (getOpts()||[]).map(v=>String(v));
     const cur = inp.value.trim().toLowerCase();
     const list = cur ? opts.filter(o => o.toLowerCase().includes(cur)) : opts;
     menu.textContent = '';
-    if(!list.length){ const e = document.createElement('div'); e.className = 'cbx-empty'; e.textContent = opts.length ? 'ไม่พบข้อมูล' : 'ยังไม่มีข้อมูลใน DB'; menu.appendChild(e); return; }
+    if(!list.length){ const e = document.createElement('div'); e.className = 'cbx-empty'; e.textContent = opts.length ? 'ไม่พบข้อมูล' : 'ยังไม่มีข้อมูลใน DB (ซิงค์ก่อน)'; menu.appendChild(e); return; }
     list.slice(0,300).forEach(o=>{
       const d = document.createElement('div'); d.className = 'cbx-opt' + (o.toLowerCase()===cur ? ' sel' : ''); d.textContent = o;
       d.onmousedown = e=>{ e.preventDefault(); inp.value = o; wrap.classList.remove('open'); if(onChange) onChange(o); };
@@ -4238,7 +4245,7 @@ function bindTopFields(){
   typeWrap.appendChild(typeSel);
 
   const custWrap = $('customerWrap'); custWrap.innerHTML='';
-  custWrap.appendChild(buildSelectCombo(dbMachineFieldOptions('CustomerName'), order.customer, v=>{ order.customer = v; }, '- เลือก/พิมพ์ลูกค้า -'));
+  custWrap.appendChild(buildSelectCombo(()=>dbMachineFieldOptions('CustomerName'), order.customer, v=>{ order.customer = v; }, '- เลือก/พิมพ์ลูกค้า -'));
 }
 
 /* Renders the PartUsage ledger rows. Shared so the ledger looks identical
@@ -4925,7 +4932,7 @@ function renderItems(){
   });
   list.querySelectorAll('.mt-wrap').forEach(wrap=>{
     const idx = +wrap.dataset.idx;
-    wrap.appendChild(buildSelectCombo(dbMachineFieldOptions('MachineType'), order.items[idx].machineType, v=>{ order.items[idx].machineType = v; }, '- เลือก/พิมพ์รุ่นเครื่อง -'));
+    wrap.appendChild(buildSelectCombo(()=>dbMachineFieldOptions('MachineType'), order.items[idx].machineType, v=>{ order.items[idx].machineType = v; }, '- เลือก/พิมพ์รุ่นเครื่อง -'));
   });
   list.querySelectorAll('.btn-del-row').forEach(btn=>btn.onclick = ()=>{
     order.items.splice(+btn.dataset.idx,1);
