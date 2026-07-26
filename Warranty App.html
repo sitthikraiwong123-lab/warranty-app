@@ -5934,6 +5934,18 @@ function openSendReviewModal(paMode){
     btn.disabled = true; btn.textContent = paMode ? 'กำลังส่ง...' : 'กำลังเปิด Outlook...';
     try{
       if(paMode){
+        /* fileContentBase64 is PLAIN base64 of the PDF bytes (no data: prefix).
+           FLOW CONTRACT — the Outlook "Send an email (V2)" step must bind
+           Attachments Content with the expression
+
+             base64ToBinary(triggerBody()?['fileContentBase64'])
+
+           and NOT the raw dynamic-content token. ContentBytes is declared
+           `format: byte`, so a plain string bound to it gets base64-encoded a
+           SECOND time by the runtime; the recipient then receives a file whose
+           bytes are the base64 *text* ("JVBERi0..." when opened in Notepad) and
+           every PDF reader reports it as damaged. base64ToBinary() hands the
+           runtime a binary value, which round-trips back to exactly these bytes. */
         const fileContentBase64 = await blobToBase64(_pdfBlob);
         const res = await fetch(paSendUrl(), {
           method:'POST', headers:{'Content-Type':'application/json'},
