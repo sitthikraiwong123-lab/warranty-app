@@ -6343,10 +6343,10 @@ const TH_EN = {
   'ปิด Power Automate ส่งตรงแล้ว (มีผลกับทุกคน)':'Power Automate direct send is off (affects everyone)',
   'บันทึกลิงก์ Flow แล้ว (มีผลกับทุกคน)':'Flow URL saved (affects everyone)',
   'ล้างลิงก์ Flow แล้ว — กลับไปใช้ลิงก์เริ่มต้นในโค้ด':'Flow URL cleared — falling back to the built-in default',
-  'ซ่อนปุ่ม Auto email':'Hide the Auto email button',
-  'ซ่อนปุ่ม ⚡ ในเมนู 📄 (ปุ่มที่ส่งอัตโนมัติผ่าน Flow นี้)':'Hide ⚡ in the 📄 menu (the button that sends automatically via the Flow)',
-  'แสดงปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)':'⚡ Auto email is now shown (affects everyone)',
-  'ซ่อนปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)':'⚡ Auto email is now hidden (affects everyone)',
+  'เปิดใช้งานปุ่ม Auto email':'Activate the Auto email button',
+  'แสดงปุ่ม ⚡ ในเมนู 📄 (ปุ่มที่ส่งอัตโนมัติผ่าน Flow นี้)':'Show ⚡ in the 📄 menu (the button that sends automatically via the Flow)',
+  'เปิดใช้งานปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)':'⚡ Auto email button activated (affects everyone)',
+  'ปิดใช้งานปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)':'⚡ Auto email button deactivated (affects everyone)',
   'แสดงปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)':'✉ Send to email is now shown (affects everyone)',
   'ซ่อนปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)':'✉ Send to email is now hidden (affects everyone)',
   'เปิด-ปิดปุ่ม ✉ Send to email ในเมนู 📄 — เปิด Outlook พร้อมร่างอีเมล':'Turn the ✉ Send to email button in the 📄 menu on/off — opens Outlook with a drafted email',
@@ -6921,10 +6921,14 @@ function openPowerAutomateModal(){
         <span class="sp-txt"><b>จัดการอีเมลผู้รับ</b><span>รายชื่อ To/CC ที่ใช้ตอนส่งตรงผ่าน Flow</span></span>
         <span class="tm-chev">›</span>
       </button>
-      <button type="button" class="sp-row pa-hideauto">
+      <!-- Phrased as "activate the BUTTON" (not just "show it") and includes the
+           word ปุ่ม/button deliberately — this page already has an activate switch
+           for the FLOW itself (.pa-toggle above); without that word the two rows
+           read as duplicates of the same on/off. -->
+      <button type="button" class="sp-row pa-activateauto">
         <span class="tm-ic">⚡</span>
-        <span class="sp-txt"><b>ซ่อนปุ่ม Auto email</b><span>ซ่อนปุ่ม ⚡ ในเมนู 📄 (ปุ่มที่ส่งอัตโนมัติผ่าน Flow นี้)</span></span>
-        <span class="tm-sw pa-ha-sw"></span>
+        <span class="sp-txt"><b>เปิดใช้งานปุ่ม Auto email</b><span>แสดงปุ่ม ⚡ ในเมนู 📄 (ปุ่มที่ส่งอัตโนมัติผ่าน Flow นี้)</span></span>
+        <span class="tm-sw pa-aa-sw"></span>
       </button>
     </div>
     <div class="epm-actions"><button type="button" class="btn pa-close">ปิด</button></div>
@@ -6942,7 +6946,7 @@ function openPowerAutomateModal(){
   const setStatus = (cls, txt)=>{ statusEl.className = 'pa-status sp-status ' + cls; statusEl.textContent = txt; };
   const render = ()=>{
     ov.querySelector('.pa-sw').classList.toggle('on', paSendOn());
-    ov.querySelector('.pa-ha-sw').classList.toggle('on', hideAutoEmailOn());
+    ov.querySelector('.pa-aa-sw').classList.toggle('on', !hideAutoEmailOn());  // on = button ACTIVE (shown)
     if(paSendOn())            setStatus('on',   '● เปิดใช้งานอยู่ — ⚡ Auto email จะส่งจริงพร้อมไฟล์แนบ');
     else if(appSettings.paUrl) setStatus('off', '○ ปิดอยู่ — บันทึกลิงก์ไว้แล้ว กดสวิตช์เพื่อเปิดใช้งาน');
     else                       setStatus('warn','▲ ยังไม่ได้ตั้งค่าลิงก์ Flow — วางลิงก์แล้วกดบันทึก');
@@ -6998,11 +7002,11 @@ function openPowerAutomateModal(){
 
   ov.querySelector('.pa-recipients').onclick = ()=>openEmailRecipientsModal();
 
-  ov.querySelector('.pa-hideauto').onclick = async ()=>{
-    const next = !hideAutoEmailOn();
-    await saveAppSettings({ hideAutoEmail: next });
+  ov.querySelector('.pa-activateauto').onclick = async ()=>{
+    const nextHidden = !hideAutoEmailOn();
+    await saveAppSettings({ hideAutoEmail: nextHidden });
     render();
-    flashStatus(next ? 'ซ่อนปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)' : 'แสดงปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)', 5000);
+    flashStatus(nextHidden ? 'ปิดใช้งานปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)' : 'เปิดใช้งานปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)', 5000);
   };
 }
 
