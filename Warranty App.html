@@ -18,6 +18,7 @@
   --border:#dcdcdc;
   --green:#16a34a;
   --amber:#d97706;
+  --blue:#2563eb;
   --radius:10px;
 }
 *{box-sizing:border-box;}
@@ -669,9 +670,12 @@ html[lang="en"] .photo-canvas:empty::after{content:'Tap to add photo';} /* CSS-g
 #emailDraftText{width:100%;min-height:160px;box-sizing:border-box;border:1px solid var(--border);
   border-radius:8px;padding:10px;font-size:13px;line-height:1.5;font-family:inherit;resize:vertical;color:#222;}
 /* The actions live under the preview: decide what to do AFTER seeing the PDF.
-   Default state = two equal buttons (⬇ Save PDF | 📤 Share). When a Power User
-   enables ✉ Send to email it slots in as a full-width primary CTA on the top
-   row, so both the 2-button and 3-button layouts stay balanced. */
+   Default state = two equal buttons (⬇ Save PDF | 📤 Share). A Power User can
+   independently reveal ⚡ Auto email (red/primary — really sends, via Power
+   Automate) and/or ✉ Send to email (blue/accent — opens an Outlook draft):
+   one revealed = full-width CTA above the pair (3 buttons); both revealed =
+   they sit side by side above the pair instead (4 buttons). See
+   refreshEmailButtonsLayout(). */
 .pm-menu{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:12px 14px;
   background:#fff;border-top:1px solid var(--border);flex-shrink:0;
   padding-bottom:calc(12px + env(safe-area-inset-bottom,0px));}
@@ -689,6 +693,11 @@ html[lang="en"] .photo-canvas:empty::after{content:'Tap to add photo';} /* CSS-g
   box-shadow:0 3px 10px rgba(228,29,21,.26);}
 .pm-menu-item.primary:hover:not(:disabled){background:#c9160f;border-color:#c9160f;}
 .pm-menu-item.primary:active:not(:disabled){transform:scale(.98);}
+/* accent = outlined blue — ✉ Send to email (opens a draft, doesn't send by
+   itself), kept visually distinct from the red .primary "really sends" CTA */
+.pm-menu-item.accent{background:#eff6ff;border-color:var(--blue);color:var(--blue);}
+.pm-menu-item.accent:hover:not(:disabled){background:#dbeafe;}
+.pm-menu-item.accent:active:not(:disabled){transform:scale(.98);}
 
 .preview-filename{font-size:12.5px;color:var(--gray);margin-bottom:10px;word-break:break-all;}
 .preview-actions-row{display:flex;gap:10px;flex-wrap:wrap;}
@@ -813,7 +822,8 @@ table.pphoto tr td:last-child{ border-right:none !important; }
       </div>
     </div>
     <div class="pm-menu" role="menu">
-      <button class="pm-menu-item primary pm-full" id="pmSendEmail" role="menuitem"><span class="pmi-ic">✉</span><span>Send to email</span></button>
+      <button class="pm-menu-item primary pm-full" id="pmAutoEmail" role="menuitem" title="ส่งอีเมลอัตโนมัติทันทีผ่าน Power Automate พร้อมไฟล์แนบ"><span class="pmi-ic">⚡</span><span>Auto email</span></button>
+      <button class="pm-menu-item accent pm-full" id="pmSendEmail" role="menuitem"><span class="pmi-ic">✉</span><span>Send to email</span></button>
       <button class="pm-menu-item" id="pmSavePdf" role="menuitem"><span class="pmi-ic">⬇</span><span>Save PDF</span></button>
       <button class="pm-menu-item" id="pmShare" role="menuitem" title="ส่งไปยังแชท / แอปอื่น"><span class="pmi-ic">📤</span><span>Share</span></button>
     </div>
@@ -921,6 +931,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
         <button class="tm-item tm-admin" id="btnNew" role="menuitem" style="display:none;" title="สร้างใบสั่งใหม่ — ข้อมูลที่ยังไม่บันทึกจะหายไป"><span class="tm-ic">＋</span><span class="tm-txt">New</span></button>
         <button class="tm-item tm-admin" id="btnFmtToggle" role="menuitem" style="display:none;" title="เปิด-ปิด toolbar จัดข้อความ (B/I/U/สี) ในช่อง Description"><span class="tm-ic">🛠</span><span class="tm-txt">Format toolbar</span><span class="tm-sw" id="swFmt"></span></button>
         <button class="tm-item tm-admin" id="btnRunNumToggle" role="menuitem" style="display:none;" title="เปิด-ปิดการรันเลขที่เอกสาร (TL{ปี}-{เลข}) — ตั้งค่าเป็นกลาง มีผลกับทุกคน"><span class="tm-ic">🔢</span><span class="tm-txt">Running number</span><span class="tm-sw" id="swRun"></span></button>
+        <button class="tm-item tm-admin" id="btnSendEmailToggle" role="menuitem" style="display:none;" title="เปิด-ปิดปุ่ม ✉ Send to email ในเมนู 📄 — เปิด Outlook พร้อมร่างอีเมล"><span class="tm-ic">✉</span><span class="tm-txt">Send to email</span><span class="tm-sw" id="swSendEmail"></span></button>
         <button class="tm-item tm-admin" id="btnPowerAutomate" role="menuitem" style="display:none;" title="ตั้งค่า Power Automate — เปิด-ปิดส่งตรง, ลิงก์ Flow, อีเมลผู้รับ"><span class="tm-ic">⚡</span><span class="tm-txt">Power Automate</span><span class="tm-val" id="paMenuVal">ปิดอยู่</span><span class="tm-chev">›</span></button>
   </div>
 </div>
@@ -1666,11 +1677,17 @@ let lookupOnline = navigator.onLine;
 // hideSendEmail defaults TRUE: ✉ Send to email is HIDDEN out of the box and a
 // Power User reveals it from the ⚡ Power Automate page (that switch is the only
 // place it's controlled). Only ⬇ Save PDF / 📤 Share show until then.
-const DEFAULT_APP_SETTINGS = { fmtToolbar:false, runNumberEnabled:false, paSend:false, paUrl:'', hideSendEmail:true, defaultInvoiceAddress:'', defaultShippingAddress:'', runPrefix:'TL', runYear:(new Date()).getFullYear(), runNext:1 };
+const DEFAULT_APP_SETTINGS = { fmtToolbar:false, runNumberEnabled:false, paSend:false, paUrl:'', hideSendEmail:true, hideAutoEmail:true, defaultInvoiceAddress:'', defaultShippingAddress:'', runPrefix:'TL', runYear:(new Date()).getFullYear(), runNext:1 };
 let appSettings = Object.assign({}, DEFAULT_APP_SETTINGS);
 function fmtToolbarOn(){ return !!appSettings.fmtToolbar; }
 function paSendOn(){ return !!appSettings.paSend; }
+// Two independent buttons in the 📄 preview menu, each with its own Power-User
+// visibility switch: ⚡ Auto email (always sends via the Power Automate flow —
+// toggled on the ⚡ Power Automate settings page, next to the flow itself) and
+// ✉ Send to email (opens an Outlook draft — toggled in the ☰ admin section,
+// alongside the other simple feature flags).
 function hideSendEmailOn(){ return !!appSettings.hideSendEmail; }
+function hideAutoEmailOn(){ return !!appSettings.hideAutoEmail; }
 /* Remembered default addresses: a Save-change control stores the current
    invoice/shipping address into appSettings so every NEW order starts from it.
    Empty ⇒ fall back to the built-in company address. */
@@ -1706,11 +1723,29 @@ function applyAppSettings(){
   try{ refreshPowerMenuUI(); }catch(e){}
   try{ renderRunNumber(); }catch(e){}
   try{ if(!fmtToolbarOn()) fmtHideAll(); }catch(e){}
-  // ✉ Send to email can be hidden app-wide from the ⚡ settings page
-  try{
-    const se = document.getElementById('pmSendEmail');
-    if(se) se.style.display = hideSendEmailOn() ? 'none' : '';
-  }catch(e){}
+  try{ refreshEmailButtonsLayout(); }catch(e){}
+}
+/* The 📄 preview menu shows 2, 3, or 4 buttons depending on which of the two
+   email buttons a Power User has revealed:
+     neither shown -> [Save PDF][Share]                       (2 — unchanged default)
+     one shown     -> [that one, full-width]                  (3)
+                       [Save PDF][Share]
+     both shown    -> [⚡ Auto email][✉ Send to email]         (4 — side by side)
+                       [Save PDF][Share]
+   Both email buttons sit BEFORE Save PDF/Share in the DOM, in a 2-column CSS
+   grid: a single visible one spans both columns via .pm-full; two visible ones
+   pair up on their own without it — no extra grid rules needed either way. */
+function refreshEmailButtonsLayout(){
+  const auto = document.getElementById('pmAutoEmail');
+  const send = document.getElementById('pmSendEmail');
+  if(!auto || !send) return;
+  const showAuto = !hideAutoEmailOn();
+  const showSend = !hideSendEmailOn();
+  auto.style.display = showAuto ? '' : 'none';
+  send.style.display = showSend ? '' : 'none';
+  const bothShown = showAuto && showSend;
+  auto.classList.toggle('pm-full', showAuto && !bothShown);
+  send.classList.toggle('pm-full', showSend && !bothShown);
 }
 async function loadAppSettings(){
   try{ const cached = await lkvGet('appSettings'); if(cached) appSettings = Object.assign({}, DEFAULT_APP_SETTINGS, cached); }catch(e){}
@@ -5773,22 +5808,39 @@ async function probePowerAutomateFlow(url){
   }
 }
 
-function emailCurrentPdf(){
+/* ⚡ Auto email — always the Power Automate path, and only if the flow itself
+   is active (paSendOn(), set on the ⚡ settings page). The BUTTON's visibility
+   (hideAutoEmailOn) is a separate concern from whether the flow is actually
+   configured — a Power User could reveal the button before wiring up a Flow
+   URL, so this guards against opening a modal that can only fail. */
+function autoEmailCurrentPdf(){
   if(!_pdfPreviewUrl) return;
-  openSendReviewModal();
+  if(!paSendOn()){
+    flashStatus('Power Automate ยังไม่ได้เปิดใช้งาน — ไปตั้งค่าที่ ☰ → ⚡ Power Automate', 6000);
+    return;
+  }
+  openSendReviewModal(true);
+}
+/* ✉ Send to email — always the Outlook-draft path, independent of Power
+   Automate entirely. */
+function sendEmailCurrentPdf(){
+  if(!_pdfPreviewUrl) return;
+  openSendReviewModal(false);
 }
 
-function openSendReviewModal(){
+function openSendReviewModal(paMode){
   // The To field is intentionally left to the user: recipient management lives
   // in ☰ → 👥 จัดการอีเมลผู้รับ and does NOT feed the send flow (its per-order
   // To logic isn't ready). This modal focuses on three things only — subject,
   // body, and the PDF — with To BLANK for the user to fill in Outlook.
   //
-  // Two delivery paths:
-  //   paMode — ⚡ Power Automate flow sends the mail (PDF really attached)
-  //            IMMEDIATELY; needs a To, so recipients come from the directory
-  //            (Power-User + licensed only).
-  //   else   — OUTLOOK, always: upload the PDF to Drive, then open
+  // paMode is now chosen by which button opened this modal (⚡ Auto email vs
+  // ✉ Send to email — see autoEmailCurrentPdf/sendEmailCurrentPdf above), not
+  // read from a single global setting:
+  //   paMode=true  — ⚡ Power Automate flow sends the mail (PDF really
+  //            attached) IMMEDIATELY; needs a To, so recipients come from the
+  //            directory (Power-User + licensed only).
+  //   paMode=false — OUTLOOK, always: upload the PDF to Drive, then open
   //            outlook.office.com compose with subject + body + the file link.
   //            On phones that link opens the Outlook APP itself (app-link
   //            association), which is the behaviour the team confirmed working.
@@ -5797,7 +5849,6 @@ function openSendReviewModal(){
   //            upload must never block the draft.
   //            (A compose deep link cannot carry a real attachment; 📤 Share is
   //            the path for a true attached file.)
-  const paMode = paSendOn();
   const ov = document.createElement('div');
   ov.className = 'edit-part-modal open';
   const note = paMode
@@ -6076,6 +6127,7 @@ const TH_EN = {
   '- เลือกลูกค้า -':'- Select customer -',
   '- เลือกรุ่นเครื่อง -':'- Select machine type -',
   '- เลือก/พิมพ์ชื่อลูกค้า -':'- Select / type customer -',
+  '- เลือก/พิมพ์ลูกค้า -':'- Select / type customer -',
   '- เลือก/พิมพ์รุ่นเครื่อง -':'- Select / type machine type -',
   // item rows
   'ลบ':'Delete',
@@ -6279,7 +6331,7 @@ const TH_EN = {
   'ลิงก์ต้องขึ้นต้นด้วย https://':'The URL must start with https://',
   'error: ลิงก์ต้องขึ้นต้นด้วย https://':'error: the URL must start with https://',
   'ยังไม่มีลิงก์ Flow — วางลิงก์แล้วกดบันทึกก่อน':'No Flow URL yet — paste one and save it first',
-  '● เปิดใช้งานอยู่ — ✉ Send to email จะส่งจริงพร้อมไฟล์แนบ':'● Active — ✉ Send to email will really send, with the attachment',
+  '● เปิดใช้งานอยู่ — ⚡ Auto email จะส่งจริงพร้อมไฟล์แนบ':'● Active — ⚡ Auto email will really send, with the attachment',
   '○ ปิดอยู่ — บันทึกลิงก์ไว้แล้ว กดสวิตช์เพื่อเปิดใช้งาน':'○ Off — the URL is saved; flip the switch to activate',
   '▲ ยังไม่ได้ตั้งค่าลิงก์ Flow — วางลิงก์แล้วกดบันทึก':'▲ No Flow URL set — paste one and save',
   '● ลิงก์ใช้ได้ — flow พร้อมทำงาน':'● URL works — the flow is ready',
@@ -6291,10 +6343,15 @@ const TH_EN = {
   'ปิด Power Automate ส่งตรงแล้ว (มีผลกับทุกคน)':'Power Automate direct send is off (affects everyone)',
   'บันทึกลิงก์ Flow แล้ว (มีผลกับทุกคน)':'Flow URL saved (affects everyone)',
   'ล้างลิงก์ Flow แล้ว — กลับไปใช้ลิงก์เริ่มต้นในโค้ด':'Flow URL cleared — falling back to the built-in default',
-  'ซ่อนปุ่ม Send to email':'Hide the Send to email button',
-  'ซ่อนปุ่ม ✉ ในเมนู 📄 (ใช้เฉพาะ ⬇ Save PDF / 📤 Share)':'Hide ✉ in the 📄 menu (leaving only ⬇ Save PDF / 📤 Share)',
+  'ซ่อนปุ่ม Auto email':'Hide the Auto email button',
+  'ซ่อนปุ่ม ⚡ ในเมนู 📄 (ปุ่มที่ส่งอัตโนมัติผ่าน Flow นี้)':'Hide ⚡ in the 📄 menu (the button that sends automatically via the Flow)',
+  'แสดงปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)':'⚡ Auto email is now shown (affects everyone)',
+  'ซ่อนปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)':'⚡ Auto email is now hidden (affects everyone)',
   'แสดงปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)':'✉ Send to email is now shown (affects everyone)',
   'ซ่อนปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)':'✉ Send to email is now hidden (affects everyone)',
+  'เปิด-ปิดปุ่ม ✉ Send to email ในเมนู 📄 — เปิด Outlook พร้อมร่างอีเมล':'Turn the ✉ Send to email button in the 📄 menu on/off — opens Outlook with a drafted email',
+  'ส่งอีเมลอัตโนมัติทันทีผ่าน Power Automate พร้อมไฟล์แนบ':'Sends the email immediately via Power Automate, with the file attached',
+  'Power Automate ยังไม่ได้เปิดใช้งาน — ไปตั้งค่าที่ ☰ → ⚡ Power Automate':'Power Automate is not active yet — set it up under ☰ → ⚡ Power Automate',
 
   /* ---- 👥 email recipients ---- */
   '👥 จัดการอีเมลผู้รับ':'👥 Manage email recipients',
@@ -6722,6 +6779,7 @@ function refreshPowerMenuUI(){
   document.querySelectorAll('.tm-admin').forEach(el=>{ el.style.display = on ? '' : 'none'; });
   setSw('swFmt', fmtToolbarOn());
   setSw('swRun', runNumberEnabled());
+  setSw('swSendEmail', !hideSendEmailOn());   // switch reads "on" = shown, like its neighbours
   // NB: 'เปิดอยู่'/'ปิดอยู่' (is on / is off), NOT 'เปิด'/'ปิด' — those two are
   // already dictionary keys for the ACTIONS Open/Close, so a bare 'ปิด' here
   // rendered as "Close" in EN instead of "Off".
@@ -6811,7 +6869,18 @@ document.addEventListener('DOMContentLoaded', ()=>{
       ? 'เปิด Running number แล้ว (มีผลกับทุกคน) — เลขจะรันอัตโนมัติทุกครั้งที่ Export'
       : 'ปิด Running number แล้ว (มีผลกับทุกคน)');
   };
-  // ⚡ opens its own settings page (activate, flow URL, recipients, hide-send).
+  // ✉ Send to email — visibility only (its behaviour, opening an Outlook draft,
+  // doesn't touch Power Automate, so it lives here rather than the ⚡ page).
+  const se = document.getElementById('btnSendEmailToggle');
+  if(se) se.onclick = async ()=>{
+    if(!isPowerUser()) return;
+    const next = !hideSendEmailOn();   // next = new HIDDEN value
+    await saveAppSettings({ hideSendEmail: next });
+    flashStatus(next
+      ? 'ซ่อนปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)'
+      : 'แสดงปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)');
+  };
+  // ⚡ opens its own settings page (activate, flow URL, recipients, hide-auto).
   const pa = document.getElementById('btnPowerAutomate');
   if(pa) pa.onclick = ()=>{ if(isPowerUser()) openPowerAutomateModal(); };
   // btnRunNumEdit's click handler is wired in renderRunNumber (it depends on the
@@ -6823,8 +6892,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
    One place for everything the flow needs, so nothing has to be edited in the
    source file: activate/deactivate (probing the flow first — an empty body can
    never send a mail), the flow's HTTP trigger URL, the recipient directory, and
-   whether ✉ Send to email is shown at all. Every setting is shared server-side
-   via appSettings, so an admin's change applies to everyone. */
+   whether ⚡ Auto email is shown at all (✉ Send to email's own visibility lives
+   in ☰ instead — it doesn't touch Power Automate). Every setting is shared
+   server-side via appSettings, so an admin's change applies to everyone. */
 function openPowerAutomateModal(){
   const ov = document.createElement('div');
   ov.className = 'edit-part-modal open';
@@ -6851,10 +6921,10 @@ function openPowerAutomateModal(){
         <span class="sp-txt"><b>จัดการอีเมลผู้รับ</b><span>รายชื่อ To/CC ที่ใช้ตอนส่งตรงผ่าน Flow</span></span>
         <span class="tm-chev">›</span>
       </button>
-      <button type="button" class="sp-row pa-hidesend">
-        <span class="tm-ic">✉</span>
-        <span class="sp-txt"><b>ซ่อนปุ่ม Send to email</b><span>ซ่อนปุ่ม ✉ ในเมนู 📄 (ใช้เฉพาะ ⬇ Save PDF / 📤 Share)</span></span>
-        <span class="tm-sw pa-hs-sw"></span>
+      <button type="button" class="sp-row pa-hideauto">
+        <span class="tm-ic">⚡</span>
+        <span class="sp-txt"><b>ซ่อนปุ่ม Auto email</b><span>ซ่อนปุ่ม ⚡ ในเมนู 📄 (ปุ่มที่ส่งอัตโนมัติผ่าน Flow นี้)</span></span>
+        <span class="tm-sw pa-ha-sw"></span>
       </button>
     </div>
     <div class="epm-actions"><button type="button" class="btn pa-close">ปิด</button></div>
@@ -6872,8 +6942,8 @@ function openPowerAutomateModal(){
   const setStatus = (cls, txt)=>{ statusEl.className = 'pa-status sp-status ' + cls; statusEl.textContent = txt; };
   const render = ()=>{
     ov.querySelector('.pa-sw').classList.toggle('on', paSendOn());
-    ov.querySelector('.pa-hs-sw').classList.toggle('on', hideSendEmailOn());
-    if(paSendOn())            setStatus('on',   '● เปิดใช้งานอยู่ — ✉ Send to email จะส่งจริงพร้อมไฟล์แนบ');
+    ov.querySelector('.pa-ha-sw').classList.toggle('on', hideAutoEmailOn());
+    if(paSendOn())            setStatus('on',   '● เปิดใช้งานอยู่ — ⚡ Auto email จะส่งจริงพร้อมไฟล์แนบ');
     else if(appSettings.paUrl) setStatus('off', '○ ปิดอยู่ — บันทึกลิงก์ไว้แล้ว กดสวิตช์เพื่อเปิดใช้งาน');
     else                       setStatus('warn','▲ ยังไม่ได้ตั้งค่าลิงก์ Flow — วางลิงก์แล้วกดบันทึก');
   };
@@ -6928,11 +6998,11 @@ function openPowerAutomateModal(){
 
   ov.querySelector('.pa-recipients').onclick = ()=>openEmailRecipientsModal();
 
-  ov.querySelector('.pa-hidesend').onclick = async ()=>{
-    const next = !hideSendEmailOn();
-    await saveAppSettings({ hideSendEmail: next });
+  ov.querySelector('.pa-hideauto').onclick = async ()=>{
+    const next = !hideAutoEmailOn();
+    await saveAppSettings({ hideAutoEmail: next });
     render();
-    flashStatus(next ? 'ซ่อนปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)' : 'แสดงปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)', 5000);
+    flashStatus(next ? 'ซ่อนปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)' : 'แสดงปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)', 5000);
   };
 }
 
@@ -7085,7 +7155,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
     try{ await exportPdf(); } finally { fab.disabled = false; }
   };
   document.getElementById('pmSavePdf').onclick = savePdfToDevice;
-  document.getElementById('pmSendEmail').onclick = emailCurrentPdf;
+  document.getElementById('pmAutoEmail').onclick = autoEmailCurrentPdf;
+  document.getElementById('pmSendEmail').onclick = sendEmailCurrentPdf;
   document.getElementById('pmShare').onclick = sharePdf;
   document.getElementById('btnCloseHistory').onclick = ()=>toggleHistory(false);
   const histOverlay = document.querySelector('.overlay');
