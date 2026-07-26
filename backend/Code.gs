@@ -99,6 +99,9 @@ function handleRequest(e) {
       case 'getEmailRecipients':   result = getEmailRecipients(params); break;
       case 'addEmailRecipient':    result = addEmailRecipient(params); break;
       case 'deleteEmailRecipient': result = deleteEmailRecipient(params); break;
+      case 'getSendEmailRecipients':   result = getSendEmailRecipients(params); break;
+      case 'addSendEmailRecipient':    result = addSendEmailRecipient(params); break;
+      case 'deleteSendEmailRecipient': result = deleteSendEmailRecipient(params); break;
       case 'getAppSettings':     result = getAppSettings(); break;
       case 'setAppSettings':     result = setAppSettings(params); break;
       case 'reserveExportNumber':result = reserveExportNumber(params); break;
@@ -1645,6 +1648,90 @@ function deleteEmailRecipient(params) {
   const email = String((params && params.email) || '').trim().toLowerCase();
   if (!email) throw new Error('email required');
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(EMAILRECIPIENTS_SHEET);
+  if (!sh || sh.getLastRow() < 2) return { success: true, action: 'noop' };
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    const emails = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+    for (var i = emails.length - 1; i >= 0; i--) {
+      if (String(emails[i][0]).trim().toLowerCase() === email) { sh.deleteRow(i + 2); return { success: true, action: 'deleted' }; }
+    }
+    return { success: true, action: 'not_found' };
+  } finally { try { lock.releaseLock(); } catch (e) {} }
+}
+
+// ============================================================
+// SEND-EMAIL RECIPIENTS — saved To/Cc addresses for the ✉ Send to email
+// button (opens an Outlook web draft). Deliberately a SEPARATE sheet/list from
+// EmailRecipients above (which feeds ⚡ Auto email / the Power Automate send)
+// — the two buttons are independent features with independent directories, by
+// explicit request, even though the row shape is identical. Same trust model:
+// read open to anyone, add/delete Power-User gated in the frontend UI.
+// ============================================================
+const SENDEMAILRECIPIENTS_SHEET = 'SendEmailRecipients';
+const SENDEMAILRECIPIENTS_HEADERS = ['Email', 'Name', 'Type', 'AddedBy', 'AddedAt'];
+
+function getSendEmailRecipientsSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(SENDEMAILRECIPIENTS_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(SENDEMAILRECIPIENTS_SHEET);
+    sh.appendRow(SENDEMAILRECIPIENTS_HEADERS);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function getSendEmailRecipients(params) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SENDEMAILRECIPIENTS_SHEET);
+  if (!sh || sh.getLastRow() < 2) return { success: true, rows: [] };
+  const values = sh.getRange(2, 1, sh.getLastRow() - 1, SENDEMAILRECIPIENTS_HEADERS.length).getValues();
+  const rows = [];
+  values.forEach(function (v) {
+    if (!String(v[0]).trim()) return;
+    rows.push({ Email: String(v[0]), Name: String(v[1] || ''),
+      Type: String(v[2] || '').toLowerCase() === 'cc' ? 'cc' : 'to',
+      AddedBy: String(v[3] || ''),
+      AddedAt: v[4] instanceof Date ? v[4].toISOString() : v[4] });
+  });
+  rows.sort(function (a, b) {
+    if (a.Type !== b.Type) return a.Type === 'to' ? -1 : 1;   // To ก่อน CC
+    return a.Name.localeCompare(b.Name) || a.Email.localeCompare(b.Email);
+  });
+  return { success: true, rows: rows };
+}
+
+// Upserts by email (case-insensitive) so re-adding just updates the name.
+function addSendEmailRecipient(params) {
+  const email = String((params && params.email) || '').trim();
+  if (!email || email.indexOf('@') === -1) throw new Error('valid email required');
+  const name = String((params && params.name) || '').trim();
+  const type = String((params && params.type) || '').toLowerCase() === 'cc' ? 'cc' : 'to';
+  const addedBy = String((params && params.addedBy) || '').trim();
+
+  const sh = getSendEmailRecipientsSheet_();
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    const last = sh.getLastRow();
+    let rowNum = -1;
+    if (last > 1) {
+      const emails = sh.getRange(2, 1, last - 1, 1).getValues();
+      for (var i = 0; i < emails.length; i++) {
+        if (String(emails[i][0]).trim().toLowerCase() === email.toLowerCase()) { rowNum = i + 2; break; }
+      }
+    }
+    const row = [email, name, type, addedBy, new Date()];
+    if (rowNum === -1) sh.appendRow(row);
+    else sh.getRange(rowNum, 1, 1, SENDEMAILRECIPIENTS_HEADERS.length).setValues([row]);
+    return { success: true, action: rowNum === -1 ? 'added' : 'updated' };
+  } finally { try { lock.releaseLock(); } catch (e) {} }
+}
+
+function deleteSendEmailRecipient(params) {
+  const email = String((params && params.email) || '').trim().toLowerCase();
+  if (!email) throw new Error('email required');
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SENDEMAILRECIPIENTS_SHEET);
   if (!sh || sh.getLastRow() < 2) return { success: true, action: 'noop' };
   const lock = LockService.getScriptLock();
   try { lock.waitLock(15000); } catch (e) { throw new Error('busy, try again'); }

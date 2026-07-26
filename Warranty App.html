@@ -931,7 +931,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
         <button class="tm-item tm-admin" id="btnNew" role="menuitem" style="display:none;" title="สร้างใบสั่งใหม่ — ข้อมูลที่ยังไม่บันทึกจะหายไป"><span class="tm-ic">＋</span><span class="tm-txt">New</span></button>
         <button class="tm-item tm-admin" id="btnFmtToggle" role="menuitem" style="display:none;" title="เปิด-ปิด toolbar จัดข้อความ (B/I/U/สี) ในช่อง Description"><span class="tm-ic">🛠</span><span class="tm-txt">Format toolbar</span><span class="tm-sw" id="swFmt"></span></button>
         <button class="tm-item tm-admin" id="btnRunNumToggle" role="menuitem" style="display:none;" title="เปิด-ปิดการรันเลขที่เอกสาร (TL{ปี}-{เลข}) — ตั้งค่าเป็นกลาง มีผลกับทุกคน"><span class="tm-ic">🔢</span><span class="tm-txt">Running number</span><span class="tm-sw" id="swRun"></span></button>
-        <button class="tm-item tm-admin" id="btnSendEmailToggle" role="menuitem" style="display:none;" title="เปิด-ปิดปุ่ม ✉ Send to email ในเมนู 📄 — เปิด Outlook พร้อมร่างอีเมล"><span class="tm-ic">✉</span><span class="tm-txt">Send to email</span><span class="tm-sw" id="swSendEmail"></span></button>
+        <button class="tm-item tm-admin" id="btnSendEmailSettings" role="menuitem" style="display:none;" title="ตั้งค่า Send to email — เปิด-ปิดปุ่ม, จัดการผู้รับ"><span class="tm-ic">✉</span><span class="tm-txt">Send to email</span><span class="tm-val" id="seMenuVal">ปิดอยู่</span><span class="tm-chev">›</span></button>
         <button class="tm-item tm-admin" id="btnPowerAutomate" role="menuitem" style="display:none;" title="ตั้งค่า Power Automate — เปิด-ปิดส่งตรง, ลิงก์ Flow, อีเมลผู้รับ"><span class="tm-ic">⚡</span><span class="tm-txt">Power Automate</span><span class="tm-val" id="paMenuVal">ปิดอยู่</span><span class="tm-chev">›</span></button>
   </div>
 </div>
@@ -5829,31 +5829,30 @@ function sendEmailCurrentPdf(){
 }
 
 function openSendReviewModal(paMode){
-  // The To field is intentionally left to the user: recipient management lives
-  // in ☰ → 👥 จัดการอีเมลผู้รับ and does NOT feed the send flow (its per-order
-  // To logic isn't ready). This modal focuses on three things only — subject,
-  // body, and the PDF — with To BLANK for the user to fill in Outlook.
-  //
-  // paMode is now chosen by which button opened this modal (⚡ Auto email vs
-  // ✉ Send to email — see autoEmailCurrentPdf/sendEmailCurrentPdf above), not
-  // read from a single global setting:
+  // paMode is chosen by which button opened this modal (⚡ Auto email vs
+  // ✉ Send to email — see autoEmailCurrentPdf/sendEmailCurrentPdf above), each
+  // with its OWN, separate recipients directory:
   //   paMode=true  — ⚡ Power Automate flow sends the mail (PDF really
-  //            attached) IMMEDIATELY; needs a To, so recipients come from the
-  //            directory (Power-User + licensed only).
-  //   paMode=false — OUTLOOK, always: upload the PDF to Drive, then open
-  //            outlook.office.com compose with subject + body + the file link.
-  //            On phones that link opens the Outlook APP itself (app-link
-  //            association), which is the behaviour the team confirmed working.
-  //            The upload is best-effort: if it fails, Outlook STILL opens with
-  //            the message and a note to attach the PDF by hand — a broken
-  //            upload must never block the draft.
-  //            (A compose deep link cannot carry a real attachment; 📤 Share is
-  //            the path for a true attached file.)
+  //            attached) IMMEDIATELY; To/CC come from the Auto email
+  //            directory (👥 managed on the ⚡ Power Automate settings page).
+  //   paMode=false — OUTLOOK WEB, always, on every device: upload the PDF to
+  //            Drive, then open outlook.office.com compose with subject +
+  //            body + the file link, To/CC prefilled from the Send to email
+  //            directory (👥 managed on its own settings page — a SEPARATE
+  //            list from Auto email's, by explicit request). Recipients are
+  //            only a starting point — still editable inside Outlook.
+  //            The upload is best-effort: if it fails, Outlook STILL opens
+  //            with the message and a note to attach the PDF by hand — a
+  //            broken upload must never block the draft.
+  //            (A compose deep link cannot carry a real attachment; 📤 Share
+  //            is the path for a true attached file. The mobile-app deep link
+  //            — intent://, ms-outlook:// — this button used to try first was
+  //            removed on request: it now always opens the web compose page.)
   const ov = document.createElement('div');
   ov.className = 'edit-part-modal open';
   const note = paMode
     ? '⚡ ระบบจะส่งอีเมลออกทันทีพร้อมไฟล์แนบเมื่อกด “ส่งอีเมล” — ผู้รับดึงจากสมุดรายชื่อ'
-    : 'กดปุ่มเดียว → เปิด Outlook พร้อมหัวข้อ + เนื้อหา + ลิงก์ไฟล์ PDF · ช่อง “ถึง” เว้นว่างให้กรอกเองใน Outlook';
+    : 'กดปุ่มเดียว → เปิด Outlook เว็บพร้อมหัวข้อ + เนื้อหา + ผู้รับ (จากสมุดรายชื่อ) + ลิงก์ไฟล์ PDF · แก้ไขเพิ่มเติมได้ใน Outlook';
   ov.innerHTML = `<div class="edit-part-dialog">
     <div class="epm-head"><span>ตรวจทานก่อนส่งอีเมล</span><button type="button" class="epm-x">✕</button></div>
     <div class="epm-body">
@@ -5876,26 +5875,19 @@ function openSendReviewModal(paMode){
 
   const btn = ov.querySelector('.srm-send');
   const idleLabel = paMode ? 'ส่งอีเมล' : '🟦 ส่งเข้า Outlook';
-  // Recipients feed ONLY the PA path (which can't send with a blank To).
-  const toList = ()=> _emailRecipientsCache.filter(r => r.Type !== 'cc');
-  const ccList = ()=> _emailRecipientsCache.filter(r => r.Type === 'cc');
+  // Each button reads its OWN directory — Auto email and Send to email do not
+  // share recipients, by explicit request, even though the row shape is
+  // identical (see the SendEmailRecipients sheet comment in Code.gs).
+  const recipCache = ()=> paMode ? _emailRecipientsCache : _sendEmailRecipientsCache;
+  const toList = ()=> recipCache().filter(r => r.Type !== 'cc');
+  const ccList = ()=> recipCache().filter(r => r.Type === 'cc');
   const joinEmails = rows => rows.map(r => r.Email).join(';');
-  if(paMode) loadEmailRecipients();   // warm the cache for the PA send
+  if(paMode) loadEmailRecipients(); else loadSendEmailRecipients();   // warm the cache
 
-  // Two Outlook targets:
-  //   MOBILE → the Outlook APP itself, via its URI scheme. Android blocks a raw
-  //     ms-outlook:// navigation from a page, so it must go through an intent://
-  //     URL that names the package and carries a browser_fallback_url; iOS takes
-  //     the raw ms-outlook:// scheme, with a visibility check falling back to
-  //     Outlook web if the app isn't installed.
-  //   DESKTOP → Outlook web compose (outlook.office.com), opened in a reserved
-  //     tab (the popup-block-safe one-tap trick).
-  // A compose deep link (app or web) cannot carry a real attachment, so the PDF
-  // rides as a link in the body; 📤 Share is the true-attachment path.
-  const isAndroid = /Android/i.test(navigator.userAgent);
-  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-    (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent)); // iPadOS masquerades as Mac
-  const isMobile = isAndroid || isIOS;
+  // Outlook WEB compose, always — on every device. Reserved-tab trick keeps it
+  // popup-block-safe across the async upload that precedes it (see the send
+  // handler below). A compose deep link cannot carry a real attachment, so the
+  // PDF rides as a link in the body; 📤 Share is the true-attachment path.
   let uploadedUrl = '';
   const enc = encodeURIComponent;
   // This text ends up inside the OUTGOING EMAIL, never in a DOM text node, so
@@ -5903,34 +5895,19 @@ function openSendReviewModal(paMode){
   const composeBody = body => body + (uploadedUrl
     ? '\n\n' + t('📎 ไฟล์ PDF:') + ' ' + uploadedUrl
     : '\n\n' + t('[แนบไฟล์ PDF ก่อนส่ง — กด ⬇ Save PDF ในแอปเพื่อดาวน์โหลดไฟล์]'));
-  const webComposeUrl = (subject, body)=>
-    'https://outlook.office.com/mail/deeplink/compose?subject=' + enc(subject) + '&body=' + enc(composeBody(body));
+  const webComposeUrl = (subject, body)=>{
+    let url = 'https://outlook.office.com/mail/deeplink/compose?subject=' + enc(subject) + '&body=' + enc(composeBody(body));
+    const to = joinEmails(toList()), cc = joinEmails(ccList());
+    if(to) url += '&to=' + enc(to);
+    if(cc) url += '&cc=' + enc(cc);
+    return url;
+  };
   const openOutlookWeb = (win, subject, body)=>{
     const url = webComposeUrl(subject, body);
     if(win && !win.closed){ win.location.href = url; return; }
     const a = document.createElement('a');
     a.href = url; a.target = '_blank'; a.rel = 'noopener';
     document.body.appendChild(a); a.click(); a.remove();
-  };
-  // Fire the Outlook APP on mobile; falls back to Outlook web if not installed.
-  const openOutlookApp = (subject, body)=>{
-    const b = composeBody(body);
-    if(isAndroid){
-      // intent:// → Outlook app if present, else Chrome follows the fallback URL.
-      window.location.href = 'intent://compose?subject=' + enc(subject) + '&body=' + enc(b) +
-        '#Intent;scheme=ms-outlook;package=com.microsoft.office.outlook;' +
-        'S.browser_fallback_url=' + enc(webComposeUrl(subject, body)) + ';end';
-      return;
-    }
-    // iOS: try the app scheme; if the page never backgrounds, open web instead.
-    let opened = false;
-    const onHide = ()=>{ if(document.visibilityState === 'hidden') opened = true; };
-    document.addEventListener('visibilitychange', onHide);
-    window.location.href = 'ms-outlook://compose?subject=' + enc(subject) + '&body=' + enc(b);
-    setTimeout(()=>{
-      document.removeEventListener('visibilitychange', onHide);
-      if(!opened) openOutlookWeb(null, subject, body);
-    }, 1800);
   };
 
   ov.querySelector('.srm-send').onclick = async ()=>{
@@ -5940,19 +5917,21 @@ function openSendReviewModal(paMode){
     const showErr = m => { errEl.textContent = m; errEl.style.display=''; };
     errEl.style.display = 'none';
     if(!_pdfBlob){ showErr('ไม่พบไฟล์ PDF — กลับไปกด 📄 เพื่อสร้างใหม่'); return; }
-    if(paMode && !toList().length){ showErr('โหมด ⚡ ต้องมีผู้รับ (To) — เพิ่มที่ ☰ → 👥 จัดการอีเมลผู้รับ'); return; }
+    if(paMode && !toList().length){ showErr('โหมด ⚡ ต้องมีผู้รับ (To) — เพิ่มที่ ☰ → ⚡ Power Automate → 👥 จัดการผู้รับ'); return; }
 
-    // Desktop second tap: upload done but the reserved tab was popup-blocked.
-    if(!paMode && !isMobile && uploadedUrl){
+    // Second tap: upload already done but the reserved tab got popup-blocked.
+    if(!paMode && uploadedUrl){
       openOutlookWeb(null, subject, body);
       commitPdfAction();
-      flashStatus('เปิด Outlook แล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่งใน Outlook', 7000);
+      flashStatus('เปิด Outlook เว็บแล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — ตรวจผู้รับแล้วกดส่งใน Outlook', 7000);
       userDismissTopModal();
       return;
     }
-    // Desktop reserves the web tab in-gesture; mobile navigates itself to the app.
-    const win = (!paMode && !isMobile) ? window.open('about:blank', '_blank') : null;
-    btn.disabled = true; btn.textContent = paMode ? 'กำลังส่ง...' : (isMobile ? 'กำลังเปิดแอป Outlook...' : 'กำลังเปิด Outlook...');
+    // Reserve the tab INSIDE the click gesture so the async upload that
+    // follows can't burn it and get popup-blocked — same on every device now
+    // that this always opens a browser tab (no more mobile-app branch).
+    const win = !paMode ? window.open('about:blank', '_blank') : null;
+    btn.disabled = true; btn.textContent = paMode ? 'กำลังส่ง...' : 'กำลังเปิด Outlook...';
     try{
       if(paMode){
         const fileContentBase64 = await blobToBase64(_pdfBlob);
@@ -5985,25 +5964,15 @@ function openSendReviewModal(paMode){
         uploadErr = (upErr && upErr.message) ? upErr.message : String(upErr);
       }
 
-      if(isMobile){
-        // Navigate this window to the Outlook app (falls back to web internally).
-        commitPdfAction();
-        openOutlookApp(subject, body);
-        flashStatus(uploadedUrl
-          ? 'กำลังเปิดแอป Outlook — ลิงก์ไฟล์อยู่ในเนื้อหา (ถ้าไม่มีแอปจะเปิด Outlook เว็บ)'
-          : 'กำลังเปิดแอป Outlook — อัพโหลดไฟล์ไม่สำเร็จ (' + uploadErr + ') · แนบไฟล์เองด้วย ⬇ Save PDF', 8000);
-        userDismissTopModal();
-        return;
-      }
       if(win && !win.closed){
         openOutlookWeb(win, subject, body);
         commitPdfAction();
         flashStatus(uploadedUrl
-          ? 'เปิด Outlook แล้ว ✓ (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่ง'
-          : 'เปิด Outlook แล้ว — แต่อัพโหลดไฟล์ไม่สำเร็จ (' + uploadErr + ') · กด ⬇ Save PDF แล้วแนบเอง', 8000);
+          ? 'เปิด Outlook เว็บแล้ว ✓ (ลิงก์ PDF อยู่ในเนื้อหา) — ตรวจผู้รับแล้วกดส่ง'
+          : 'เปิด Outlook เว็บแล้ว — แต่อัพโหลดไฟล์ไม่สำเร็จ (' + uploadErr + ') · กด ⬇ Save PDF แล้วแนบเอง', 8000);
         userDismissTopModal();
       }else{
-        btn.disabled = false; btn.textContent = '🟦 เปิด Outlook ส่งเมล';
+        btn.disabled = false; btn.textContent = idleLabel;
         flashStatus(uploadedUrl
           ? 'ไฟล์พร้อมแล้ว ✓ — กดปุ่มอีกครั้งเพื่อเปิด Outlook'
           : 'อัพโหลดไม่สำเร็จ — กดปุ่มอีกครั้งเพื่อเปิด Outlook แล้วแนบไฟล์เอง', 6000);
@@ -6347,11 +6316,30 @@ const TH_EN = {
   'แสดงปุ่ม ⚡ ในเมนู 📄 (ปุ่มที่ส่งอัตโนมัติผ่าน Flow นี้)':'Show ⚡ in the 📄 menu (the button that sends automatically via the Flow)',
   'เปิดใช้งานปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)':'⚡ Auto email button activated (affects everyone)',
   'ปิดใช้งานปุ่ม ⚡ Auto email แล้ว (มีผลกับทุกคน)':'⚡ Auto email button deactivated (affects everyone)',
-  'แสดงปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)':'✉ Send to email is now shown (affects everyone)',
-  'ซ่อนปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)':'✉ Send to email is now hidden (affects everyone)',
-  'เปิด-ปิดปุ่ม ✉ Send to email ในเมนู 📄 — เปิด Outlook พร้อมร่างอีเมล':'Turn the ✉ Send to email button in the 📄 menu on/off — opens Outlook with a drafted email',
   'ส่งอีเมลอัตโนมัติทันทีผ่าน Power Automate พร้อมไฟล์แนบ':'Sends the email immediately via Power Automate, with the file attached',
   'Power Automate ยังไม่ได้เปิดใช้งาน — ไปตั้งค่าที่ ☰ → ⚡ Power Automate':'Power Automate is not active yet — set it up under ☰ → ⚡ Power Automate',
+
+  /* ---- ✉ Send to email: ☰ row + its own settings page (mirrors ⚡'s shape) ---- */
+  'ตั้งค่า Send to email — เปิด-ปิดปุ่ม, จัดการผู้รับ':'Send to email settings — turn the button on/off, manage recipients',
+  'เปิดใช้งานปุ่ม Send to email':'Activate the Send to email button',
+  'แสดงปุ่ม ✉ ในเมนู 📄 (เปิด Outlook เว็บพร้อมร่างอีเมล)':'Show ✉ in the 📄 menu (opens Outlook web with a drafted email)',
+  '● เปิดใช้งานอยู่ — ปุ่ม ✉ Send to email แสดงอยู่ในเมนู 📄':'● Active — the ✉ Send to email button is shown in the 📄 menu',
+  '○ ปิดอยู่ — กดสวิตช์เพื่อเปิดใช้งาน':'○ Off — flip the switch to activate',
+  'เปิดใช้งานปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)':'✉ Send to email button activated (affects everyone)',
+  'ปิดใช้งานปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)':'✉ Send to email button deactivated (affects everyone)',
+
+  /* ---- 👥 Auto email recipients (renamed for symmetry with Send to email's
+     own, separate directory below) ---- */
+  'จัดการผู้รับ (Auto email)':'Manage recipients (Auto email)',
+  '👥 จัดการผู้รับ (Auto email)':'👥 Manage recipients (Auto email)',
+  'รายชื่อ To/CC ที่ใช้ตอนส่งตรงผ่าน Flow — แยกจากรายชื่อของ ✉ Send to email':'The To/CC list used when sending directly via the Flow — separate from ✉ Send to email’s own list',
+  'อีเมลจะถูกส่งถึงทุกคนในรายชื่อนี้โดยอัตโนมัติเมื่อกด ⚡ Auto email — To คือผู้รับหลัก, CC คือสำเนาถึง (แก้ไขได้เฉพาะ Power User)':'Email goes to everyone on this list automatically when you tap ⚡ Auto email — To is the main recipient, CC is copied in (Power User only)',
+
+  /* ---- 👥 Send to email recipients — a SEPARATE list from Auto email's ---- */
+  'จัดการผู้รับ (Send to email)':'Manage recipients (Send to email)',
+  '👥 จัดการผู้รับ (Send to email)':'👥 Manage recipients (Send to email)',
+  'รายชื่อ To/CC ที่ auto-fill ตอนเปิด Outlook เว็บ — แยกจากรายชื่อของ ⚡ Auto email':'The To/CC list auto-filled when Outlook web opens — separate from ⚡ Auto email’s own list',
+  'รายชื่อนี้ auto-fill To/CC ตอนกด ✉ Send to email (เปิด Outlook เว็บ) — แยกจากรายชื่อของ ⚡ Auto email · To คือผู้รับหลัก, CC คือสำเนาถึง (แก้ไขได้เฉพาะ Power User)':'This list auto-fills To/CC when you tap ✉ Send to email (opens Outlook web) — separate from ⚡ Auto email’s own list · To is the main recipient, CC is copied in (Power User only)',
 
   /* ---- 👥 email recipients ---- */
   '👥 จัดการอีเมลผู้รับ':'👥 Manage email recipients',
@@ -6506,19 +6494,16 @@ const TH_EN = {
   'เนื้อหา':'Body',
   'ส่งอีเมล':'Send email',
   '🟦 ส่งเข้า Outlook':'🟦 Send to Outlook',
-  '🟦 เปิด Outlook ส่งเมล':'🟦 Open Outlook to send',
   '⚡ ระบบจะส่งอีเมลออกทันทีพร้อมไฟล์แนบเมื่อกด “ส่งอีเมล” — ผู้รับดึงจากสมุดรายชื่อ':'⚡ Tapping “Send email” sends immediately with the attachment — recipients come from the address book',
-  'กดปุ่มเดียว → เปิด Outlook พร้อมหัวข้อ + เนื้อหา + ลิงก์ไฟล์ PDF · ช่อง “ถึง” เว้นว่างให้กรอกเองใน Outlook':'One tap → opens Outlook with the subject, body and PDF link · the “To” field is left blank to fill in inside Outlook',
+  'กดปุ่มเดียว → เปิด Outlook เว็บพร้อมหัวข้อ + เนื้อหา + ผู้รับ (จากสมุดรายชื่อ) + ลิงก์ไฟล์ PDF · แก้ไขเพิ่มเติมได้ใน Outlook':'One tap → opens Outlook web with the subject, body, recipients (from the address book) and PDF link · still editable inside Outlook',
   'กำลังเปิด Outlook...':'Opening Outlook...',
-  'กำลังเปิดแอป Outlook...':'Opening the Outlook app...',
   'กำลังส่ง...':'Sending...',
   'ไม่พบไฟล์ PDF — กลับไปกด 📄 เพื่อสร้างใหม่':'PDF not found — tap 📄 again to rebuild it',
-  'โหมด ⚡ ต้องมีผู้รับ (To) — เพิ่มที่ ☰ → 👥 จัดการอีเมลผู้รับ':'⚡ mode needs a recipient (To) — add one under ☰ → 👥 Manage email recipients',
+  'โหมด ⚡ ต้องมีผู้รับ (To) — เพิ่มที่ ☰ → ⚡ Power Automate → 👥 จัดการผู้รับ':'⚡ mode needs a recipient (To) — add one under ☰ → ⚡ Power Automate → 👥 Manage recipients',
   'Flow ถูกระงับอีกครั้ง (license?) — ให้ Power User ปิด ⚡ แล้วใช้แบบลิงก์แทน':'The flow is Suspended again (licence?) — have a Power User turn ⚡ off and use the link mode instead',
   'ส่งอีเมลแล้ว ✓ (แนบ PDF อัตโนมัติ)':'Email sent ✓ (PDF attached automatically)',
-  'เปิด Outlook แล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่งใน Outlook':'Outlook opened (the PDF link is in the body) — add recipients and send from Outlook',
-  'เปิด Outlook แล้ว ✓ (ลิงก์ PDF อยู่ในเนื้อหา) — ใส่ผู้รับแล้วกดส่ง':'Outlook opened ✓ (the PDF link is in the body) — add recipients and send',
-  'กำลังเปิดแอป Outlook — ลิงก์ไฟล์อยู่ในเนื้อหา (ถ้าไม่มีแอปจะเปิด Outlook เว็บ)':'Opening the Outlook app — the file link is in the body (falls back to Outlook web if the app is missing)',
+  'เปิด Outlook เว็บแล้ว (ลิงก์ PDF อยู่ในเนื้อหา) — ตรวจผู้รับแล้วกดส่งใน Outlook':'Outlook web opened (the PDF link is in the body) — check the recipients and send from Outlook',
+  'เปิด Outlook เว็บแล้ว ✓ (ลิงก์ PDF อยู่ในเนื้อหา) — ตรวจผู้รับแล้วกดส่ง':'Outlook web opened ✓ (the PDF link is in the body) — check the recipients and send',
   'อัพโหลดแล้ว แต่เปิดลิงก์สาธารณะไม่ได้ — ผู้รับอาจต้องขอสิทธิ์เข้าถึงไฟล์':'Uploaded, but the link could not be made public — recipients may have to request access',
   'ไฟล์พร้อมแล้ว ✓ — กดปุ่มอีกครั้งเพื่อเปิด Outlook':'File ready ✓ — tap again to open Outlook',
   'อัพโหลดไม่สำเร็จ — กดปุ่มอีกครั้งเพื่อเปิด Outlook แล้วแนบไฟล์เอง':'Upload failed — tap again to open Outlook and attach the file yourself',
@@ -6600,10 +6585,8 @@ const TH_EN_RULES = [
   [/^ทดสอบ flow ไม่ผ่าน \((.+)\) — ยังไม่เปิดใช้$/, 'Flow test failed ($1) — not enabled'],
 
   /* --- Outlook + upload combinations --- */
-  [/^กำลังเปิดแอป Outlook — อัพโหลดไฟล์ไม่สำเร็จ \((.+)\) · แนบไฟล์เองด้วย ⬇ Save PDF$/,
-     'Opening the Outlook app — the upload failed ($1) · attach the file yourself with ⬇ Save PDF'],
-  [/^เปิด Outlook แล้ว — แต่อัพโหลดไฟล์ไม่สำเร็จ \((.+)\) · กด ⬇ Save PDF แล้วแนบเอง$/,
-     'Outlook opened — but the upload failed ($1) · tap ⬇ Save PDF and attach it yourself']
+  [/^เปิด Outlook เว็บแล้ว — แต่อัพโหลดไฟล์ไม่สำเร็จ \((.+)\) · กด ⬇ Save PDF แล้วแนบเอง$/,
+     'Outlook web opened — but the upload failed ($1) · tap ⬇ Save PDF and attach it yourself']
 ];
 
 const _i18nTextOrig = new WeakMap();   // Text node -> original Thai string
@@ -6779,11 +6762,11 @@ function refreshPowerMenuUI(){
   document.querySelectorAll('.tm-admin').forEach(el=>{ el.style.display = on ? '' : 'none'; });
   setSw('swFmt', fmtToolbarOn());
   setSw('swRun', runNumberEnabled());
-  setSw('swSendEmail', !hideSendEmailOn());   // switch reads "on" = shown, like its neighbours
   // NB: 'เปิดอยู่'/'ปิดอยู่' (is on / is off), NOT 'เปิด'/'ปิด' — those two are
   // already dictionary keys for the ACTIONS Open/Close, so a bare 'ปิด' here
   // rendered as "Close" in EN instead of "Off".
   setTxt('paMenuVal', paSendOn() ? 'เปิดอยู่' : 'ปิดอยู่');
+  setTxt('seMenuVal', !hideSendEmailOn() ? 'เปิดอยู่' : 'ปิดอยู่');
   try{ renderRunNumber(); }catch(e){}   // keeps the chip + the ✏️ edit menu item in sync
 }
 
@@ -6869,17 +6852,11 @@ document.addEventListener('DOMContentLoaded', ()=>{
       ? 'เปิด Running number แล้ว (มีผลกับทุกคน) — เลขจะรันอัตโนมัติทุกครั้งที่ Export'
       : 'ปิด Running number แล้ว (มีผลกับทุกคน)');
   };
-  // ✉ Send to email — visibility only (its behaviour, opening an Outlook draft,
-  // doesn't touch Power Automate, so it lives here rather than the ⚡ page).
-  const se = document.getElementById('btnSendEmailToggle');
-  if(se) se.onclick = async ()=>{
-    if(!isPowerUser()) return;
-    const next = !hideSendEmailOn();   // next = new HIDDEN value
-    await saveAppSettings({ hideSendEmail: next });
-    flashStatus(next
-      ? 'ซ่อนปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)'
-      : 'แสดงปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)');
-  };
+  // ✉ opens its own settings page (activate, recipients) — its behaviour
+  // (opening an Outlook web draft) doesn't touch Power Automate, so it lives
+  // in its own page rather than the ⚡ one.
+  const se = document.getElementById('btnSendEmailSettings');
+  if(se) se.onclick = ()=>{ if(isPowerUser()) openSendEmailSettingsModal(); };
   // ⚡ opens its own settings page (activate, flow URL, recipients, hide-auto).
   const pa = document.getElementById('btnPowerAutomate');
   if(pa) pa.onclick = ()=>{ if(isPowerUser()) openPowerAutomateModal(); };
@@ -6918,7 +6895,7 @@ function openPowerAutomateModal(){
       <div class="tm-sep" style="margin:2px 0;"></div>
       <button type="button" class="sp-row pa-recipients">
         <span class="tm-ic">👥</span>
-        <span class="sp-txt"><b>จัดการอีเมลผู้รับ</b><span>รายชื่อ To/CC ที่ใช้ตอนส่งตรงผ่าน Flow</span></span>
+        <span class="sp-txt"><b>จัดการผู้รับ (Auto email)</b><span>รายชื่อ To/CC ที่ใช้ตอนส่งตรงผ่าน Flow — แยกจากรายชื่อของ ✉ Send to email</span></span>
         <span class="tm-chev">›</span>
       </button>
       <!-- Phrased as "activate the BUTTON" (not just "show it") and includes the
@@ -7038,9 +7015,9 @@ function openEmailRecipientsModal(){
         </div>`).join('')
       : '<div class="db-empty">ยังไม่มีรายชื่อที่บันทึกไว้</div>';
     ov.innerHTML = `<div class="edit-part-dialog">
-      <div class="epm-head"><span>👥 จัดการอีเมลผู้รับ</span><button type="button" class="epm-x">✕</button></div>
+      <div class="epm-head"><span>👥 จัดการผู้รับ (Auto email)</span><button type="button" class="epm-x">✕</button></div>
       <div class="epm-body">
-        <div class="epm-note">อีเมลจะถูกส่งถึงทุกคนในรายชื่อนี้โดยอัตโนมัติ — To คือผู้รับหลัก, CC คือสำเนาถึง (แก้ไขได้เฉพาะ Power User)</div>
+        <div class="epm-note">อีเมลจะถูกส่งถึงทุกคนในรายชื่อนี้โดยอัตโนมัติเมื่อกด ⚡ Auto email — To คือผู้รับหลัก, CC คือสำเนาถึง (แก้ไขได้เฉพาะ Power User)</div>
         <label>ชื่อ<input type="text" class="er-name" placeholder="เช่น Phutthiphong"></label>
         <label>อีเมล *<input type="email" class="er-email" placeholder="name@company.com" autocomplete="off"></label>
         <label>ประเภทผู้รับ<select class="er-type"><option value="to">To — ผู้รับหลัก</option><option value="cc">CC — สำเนาถึง</option></select></label>
@@ -7086,6 +7063,136 @@ function openEmailRecipientsModal(){
   document.body.appendChild(ov);
   modalOpened();
   loadEmailRecipients().then(render);
+}
+
+/* ---------- ✉ Send to email settings page (Power-User only) ----------
+   Mirrors the ⚡ Power Automate page's shape (activate switch + a recipients
+   link) but simpler — no flow URL to configure, since this button doesn't
+   touch Power Automate at all. */
+function openSendEmailSettingsModal(){
+  const ov = document.createElement('div');
+  ov.className = 'edit-part-modal open';
+  ov.innerHTML = `<div class="edit-part-dialog">
+    <div class="epm-head"><span>✉ Send to email</span><button type="button" class="epm-x">✕</button></div>
+    <div class="epm-body">
+      <div class="se-status sp-status off">กำลังตรวจสอบ...</div>
+      <button type="button" class="sp-row se-activate">
+        <span class="tm-ic">✉</span>
+        <span class="sp-txt"><b>เปิดใช้งานปุ่ม Send to email</b><span>แสดงปุ่ม ✉ ในเมนู 📄 (เปิด Outlook เว็บพร้อมร่างอีเมล)</span></span>
+        <span class="tm-sw se-sw"></span>
+      </button>
+      <div class="tm-sep" style="margin:2px 0;"></div>
+      <button type="button" class="sp-row se-recipients">
+        <span class="tm-ic">👥</span>
+        <span class="sp-txt"><b>จัดการผู้รับ (Send to email)</b><span>รายชื่อ To/CC ที่ auto-fill ตอนเปิด Outlook เว็บ — แยกจากรายชื่อของ ⚡ Auto email</span></span>
+        <span class="tm-chev">›</span>
+      </button>
+    </div>
+    <div class="epm-actions"><button type="button" class="btn se-close">ปิด</button></div>
+  </div>`;
+  ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
+  ov.querySelector('.se-close').onclick = ()=>userDismissTopModal();
+  ov.addEventListener('click', e=>{ if(e.target===ov) userDismissTopModal(); });
+  document.body.appendChild(ov);
+  modalOpened();
+
+  const statusEl = ov.querySelector('.se-status');
+  const setStatus = (cls, txt)=>{ statusEl.className = 'se-status sp-status ' + cls; statusEl.textContent = txt; };
+  const render = ()=>{
+    const on = !hideSendEmailOn();
+    ov.querySelector('.se-sw').classList.toggle('on', on);
+    setStatus(on ? 'on' : 'off',
+      on ? '● เปิดใช้งานอยู่ — ปุ่ม ✉ Send to email แสดงอยู่ในเมนู 📄' : '○ ปิดอยู่ — กดสวิตช์เพื่อเปิดใช้งาน');
+  };
+  render();
+
+  ov.querySelector('.se-activate').onclick = async ()=>{
+    const nextHidden = !hideSendEmailOn();
+    await saveAppSettings({ hideSendEmail: nextHidden });
+    render();
+    flashStatus(nextHidden ? 'ปิดใช้งานปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)' : 'เปิดใช้งานปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)', 5000);
+  };
+
+  ov.querySelector('.se-recipients').onclick = ()=>openSendEmailRecipientsModal();
+}
+
+/* ---------- 👥 Send to email recipients (SEPARATE from Auto email's own
+   directory above, by explicit request — same shape, own sheet/cache). Read
+   open to everyone (feeds the send-review modal's auto-fill); add/delete is
+   Power-User gated in the UI. ---------- */
+let _sendEmailRecipientsCache = [];
+async function loadSendEmailRecipients(){
+  try{
+    const res = await lookupApiCall('getSendEmailRecipients', {});
+    _sendEmailRecipientsCache = (res && res.rows) || [];
+  }catch(e){ /* offline / not deployed yet — keep whatever we last had */ }
+  return _sendEmailRecipientsCache;
+}
+
+function openSendEmailRecipientsModal(){
+  const ov = document.createElement('div');
+  ov.className = 'edit-part-modal open';
+  const render = ()=>{
+    const rows = _sendEmailRecipientsCache;
+    const roleChip = r => r.Type === 'cc'
+      ? '<span style="font-size:11px;font-weight:700;color:var(--gray);border:1px solid var(--gray);border-radius:4px;padding:1px 6px;">CC</span>'
+      : '<span style="font-size:11px;font-weight:700;color:var(--blue);border:1px solid var(--blue);border-radius:4px;padding:1px 6px;">To</span>';
+    const list = rows.length
+      ? rows.map(r => `<div class="epm-restore-card" style="display:flex;align-items:center;gap:8px;">
+          ${roleChip(r)}
+          <div style="flex:1;min-width:0;"><b>${escHtml(r.Name||'(ไม่มีชื่อ)')}</b><br><span style="color:var(--gray);font-size:12px;">${escHtml(r.Email)}</span></div>
+          <button type="button" class="btn ser-del" data-email="${escAttr(r.Email)}" style="padding:6px 10px;font-size:12px;color:var(--red);border-color:var(--red);">ลบ</button>
+        </div>`).join('')
+      : '<div class="db-empty">ยังไม่มีรายชื่อที่บันทึกไว้</div>';
+    ov.innerHTML = `<div class="edit-part-dialog">
+      <div class="epm-head"><span>👥 จัดการผู้รับ (Send to email)</span><button type="button" class="epm-x">✕</button></div>
+      <div class="epm-body">
+        <div class="epm-note">รายชื่อนี้ auto-fill To/CC ตอนกด ✉ Send to email (เปิด Outlook เว็บ) — แยกจากรายชื่อของ ⚡ Auto email · To คือผู้รับหลัก, CC คือสำเนาถึง (แก้ไขได้เฉพาะ Power User)</div>
+        <label>ชื่อ<input type="text" class="ser-name" placeholder="เช่น Phutthiphong"></label>
+        <label>อีเมล *<input type="email" class="ser-email" placeholder="name@company.com" autocomplete="off"></label>
+        <label>ประเภทผู้รับ<select class="ser-type"><option value="to">To — ผู้รับหลัก</option><option value="cc">CC — สำเนาถึง</option></select></label>
+        <div class="db-status-line err ser-err" style="display:none;"></div>
+        <button type="button" class="btn btn-primary ser-add" style="width:100%;margin-top:4px;">＋ เพิ่มรายชื่อ</button>
+        <div class="epm-restore-list" style="margin-top:14px;">${list}</div>
+      </div>
+      <div class="epm-actions"><button type="button" class="btn ser-close">ปิด</button></div>
+    </div>`;
+    ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
+    ov.querySelector('.ser-close').onclick = ()=>userDismissTopModal();
+    ov.querySelectorAll('.ser-del').forEach(btn=>{
+      btn.onclick = async ()=>{
+        if(!confirm('ลบ ' + btn.dataset.email + ' ออกจากรายชื่อที่บันทึกไว้?')) return;
+        btn.disabled = true;
+        try{
+          await lookupApiCall('deleteSendEmailRecipient', { email: btn.dataset.email });
+          await loadSendEmailRecipients();
+          render();
+        }catch(err){ alert('ลบไม่สำเร็จ: ' + (err.message||err)); btn.disabled = false; }
+      };
+    });
+    ov.querySelector('.ser-add').onclick = async ()=>{
+      const nameInp = ov.querySelector('.ser-name'), emailInp = ov.querySelector('.ser-email');
+      const errEl = ov.querySelector('.ser-err');
+      const email = emailInp.value.trim();
+      if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+        errEl.textContent = 'กรุณาใส่อีเมลให้ถูกต้อง'; errEl.style.display=''; emailInp.focus(); return;
+      }
+      const btn = ov.querySelector('.ser-add'); btn.disabled = true;
+      try{
+        await lookupApiCall('addSendEmailRecipient', { email, name: nameInp.value.trim(), type: ov.querySelector('.ser-type').value, addedBy: getSessionEditor()||'' });
+        await loadSendEmailRecipients();
+        render();
+      }catch(err){
+        errEl.textContent = 'เพิ่มไม่สำเร็จ: ' + (err.message||err); errEl.style.display='';
+        btn.disabled = false;
+      }
+    };
+  };
+  render();
+  ov.addEventListener('click', e=>{ if(e.target===ov) userDismissTopModal(); });
+  document.body.appendChild(ov);
+  modalOpened();
+  loadSendEmailRecipients().then(render);
 }
 
 /* ---------------- Tab-scoped editor session ----------------
