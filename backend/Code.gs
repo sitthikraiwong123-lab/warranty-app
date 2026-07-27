@@ -138,7 +138,15 @@ function defaultAppSettings_() {
     defaultShippingAddress: '',// remembered default shipping address for new orders
     runPrefix: 'TL',          // number prefix, e.g. TL2026-001
     runYear: (new Date()).getFullYear(),
-    runNext: 1                // next sequence to hand out
+    runNext: 1,               // next sequence to hand out
+    // Azure app registration used by ✉ Send to email to create a real Outlook
+    // draft through Microsoft Graph. ONE registration shared by the team; each
+    // person signs in as themselves, so the draft lands in their OWN mailbox.
+    // Empty clientId ⇒ the frontend falls back to the .eml download path.
+    // Neither value is a secret: a SPA registration is a public client and the
+    // client id is visible in the browser anyway.
+    graphClientId: '',
+    graphTenantId: 'common'
   };
 }
 function readAppSettings_() {
@@ -168,7 +176,7 @@ function setAppSettings(params) {
   lock.waitLock(10000);
   try {
     const s = readAppSettings_();
-    ['fmtToolbar', 'runNumberEnabled', 'paSend', 'paUrl', 'hideSendEmail', 'hideAutoEmail', 'defaultInvoiceAddress', 'defaultShippingAddress', 'runPrefix', 'runYear', 'runNext'].forEach(function(k) {
+    ['fmtToolbar', 'runNumberEnabled', 'paSend', 'paUrl', 'hideSendEmail', 'hideAutoEmail', 'defaultInvoiceAddress', 'defaultShippingAddress', 'runPrefix', 'runYear', 'runNext', 'graphClientId', 'graphTenantId'].forEach(function(k) {
       if (patch[k] !== undefined) s[k] = patch[k];
     });
     s.fmtToolbar = !!s.fmtToolbar;
@@ -182,6 +190,8 @@ function setAppSettings(params) {
     s.runPrefix = String(s.runPrefix || 'TL').trim().slice(0, 8) || 'TL';
     s.runYear = parseInt(s.runYear, 10) || (new Date()).getFullYear();
     s.runNext = Math.max(1, parseInt(s.runNext, 10) || 1);
+    s.graphClientId = String(s.graphClientId || '').trim().slice(0, 100);
+    s.graphTenantId = String(s.graphTenantId || 'common').trim().slice(0, 100) || 'common';
     writeAppSettings_(s);
     return { success: true, settings: s };
   } finally {

@@ -1677,10 +1677,18 @@ let lookupOnline = navigator.onLine;
 // hideSendEmail defaults TRUE: ✉ Send to email is HIDDEN out of the box and a
 // Power User reveals it from the ⚡ Power Automate page (that switch is the only
 // place it's controlled). Only ⬇ Save PDF / 📤 Share show until then.
-const DEFAULT_APP_SETTINGS = { fmtToolbar:false, runNumberEnabled:false, paSend:false, paUrl:'', hideSendEmail:true, hideAutoEmail:true, defaultInvoiceAddress:'', defaultShippingAddress:'', runPrefix:'TL', runYear:(new Date()).getFullYear(), runNext:1 };
+const DEFAULT_APP_SETTINGS = { fmtToolbar:false, runNumberEnabled:false, paSend:false, paUrl:'', hideSendEmail:true, hideAutoEmail:true, defaultInvoiceAddress:'', defaultShippingAddress:'', runPrefix:'TL', runYear:(new Date()).getFullYear(), runNext:1, graphClientId:'', graphTenantId:'common' };
 let appSettings = Object.assign({}, DEFAULT_APP_SETTINGS);
 function fmtToolbarOn(){ return !!appSettings.fmtToolbar; }
 function paSendOn(){ return !!appSettings.paSend; }
+/* ✉ Send to email has two delivery mechanisms and picks by configuration:
+   a Client ID present = create a real draft in the user's OWN mailbox through
+   Microsoft Graph and open it in Outlook on the web; empty = fall back to the
+   .eml download. The Azure app registration is shared by the whole team (one
+   registration, each person signs in as themselves), which is why it lives in
+   the server-side appSettings rather than per-device storage. */
+function graphClientId(){ return String(appSettings.graphClientId || '').trim(); }
+function graphConfigured(){ return !!graphClientId(); }
 // Two independent buttons in the 📄 preview menu, each with its own Power-User
 // visibility switch: ⚡ Auto email (always sends via the Power Automate flow —
 // toggled on the ⚡ Power Automate settings page, next to the flow itself) and
@@ -5847,6 +5855,125 @@ function buildEmlBlob(opts){
   return new Blob([eml], { type:'message/rfc822' });
 }
 
+/* ---------- ✉ Send to email — Outlook on the WEB, via Microsoft Graph ----------
+   The preferred path when an Azure app registration is configured: sign in
+   ONCE, and from then on every send creates a real draft in the signed-in
+   person's OWN mailbox and opens it in Outlook on the web — recipients,
+   subject, body and the PDF all already in place.
+
+   This is the only way to get all four of those at once in a browser. A
+   compose deeplink cannot attach a file (and drops its params on re-auth); a
+   Power Automate flow can attach, but always runs as the flow's OWNER so every
+   draft would land in one mailbox. Graph with a DELEGATED token is per-user by
+   construction: the token belongs to whoever signed in, and `/me` is them.
+
+   Requires an Azure "Single-page application" registration with the delegated
+   Mail.ReadWrite scope. Until a Client ID is saved, sendEmailCurrentPdf falls
+   back to the .eml download above, so the button keeps working regardless. */
+const MSAL_CDN = 'https://cdn.jsdelivr.net/npm/@azure/msal-browser@5.17.1/lib/msal-browser.min.js';
+const GRAPH_SCOPES = ['Mail.ReadWrite'];
+/* Graph rejects a createMessage request larger than 4 MB and base64 inflates
+   the PDF by 4/3, so cap the raw blob under 3 MB and let anything bigger take
+   the .eml route rather than fail at the last step. */
+const GRAPH_MAX_PDF_BYTES = 3 * 1024 * 1024;
+
+/* Loaded on demand, never at startup: the app shell is deliberately
+   self-contained (jsPDF, html2canvas and the font are all inlined) so it runs
+   offline, and this is the one online-only feature. A failed load resets the
+   promise so a later attempt can retry instead of caching the rejection. */
+let _msalPromise = null;
+function loadMsal(){
+  if(_msalPromise) return _msalPromise;
+  _msalPromise = new Promise((resolve, reject)=>{
+    if(window.msal) return resolve(window.msal);
+    const s = document.createElement('script');
+    s.src = MSAL_CDN;
+    s.onload = ()=> window.msal ? resolve(window.msal)
+                                : reject(new Error('โหลดไลบรารีเข้าสู่ระบบไม่สำเร็จ'));
+    s.onerror = ()=> reject(new Error('โหลดไลบรารีเข้าสู่ระบบไม่สำเร็จ — ต้องมีอินเทอร์เน็ต'));
+    document.head.appendChild(s);
+  }).catch(err=>{ _msalPromise = null; throw err; });
+  return _msalPromise;
+}
+
+/* Must match the Azure registration EXACTLY. Deriving it from the live
+   location (query/hash stripped) lets the settings page show the precise
+   string to paste into Azure instead of leaving it to guesswork. */
+function graphRedirectUri(){ return location.origin + location.pathname; }
+
+let _msalApp = null, _msalKey = '';
+async function getMsalApp(){
+  const clientId = graphClientId();
+  if(!clientId) return null;
+  const tenant = String(appSettings.graphTenantId || 'common').trim() || 'common';
+  const key = clientId + '|' + tenant + '|' + graphRedirectUri();
+  if(_msalApp && _msalKey === key) return _msalApp;   // rebuild only if config changed
+  const msal = await loadMsal();
+  const app = new msal.PublicClientApplication({
+    auth: { clientId, authority: 'https://login.microsoftonline.com/' + tenant,
+            redirectUri: graphRedirectUri() },
+    // localStorage, not sessionStorage: this is what makes "sign in once" hold
+    // across reloads and new tabs — MSAL then renews silently in the background.
+    cache: { cacheLocation: 'localStorage' }
+  });
+  await app.initialize();
+  _msalApp = app; _msalKey = key;
+  return app;
+}
+
+function graphSignedInAs(){
+  try{
+    const a = _msalApp && (_msalApp.getActiveAccount() || _msalApp.getAllAccounts()[0]);
+    return a ? (a.username || a.name || '') : '';
+  }catch(e){ return ''; }
+}
+
+/* interactive=false is the SEND path — silent only, so sending never ambushes
+   anyone with a popup; it reports 'need-login' and the caller points at the
+   settings page. The Power-User sign-in button passes true. */
+async function graphToken(interactive){
+  const app = await getMsalApp();
+  if(!app) throw new Error('ยังไม่ได้ตั้งค่า Client ID');
+  const account = app.getActiveAccount() || app.getAllAccounts()[0] || null;
+  if(account){
+    try{
+      const r = await app.acquireTokenSilent({ scopes: GRAPH_SCOPES, account });
+      return r.accessToken;
+    }catch(e){ if(!interactive) throw new Error('need-login'); }
+  }else if(!interactive){
+    throw new Error('need-login');
+  }
+  const r = await app.loginPopup({ scopes: GRAPH_SCOPES });
+  if(r && r.account) app.setActiveAccount(r.account);
+  return r.accessToken;
+}
+
+/* Creates the draft and returns Graph's Message, whose webLink opens it in
+   Outlook on the web. contentBytes is plain base64 inside JSON we author
+   ourselves — unlike Power Automate's `format: byte` field, nothing re-encodes
+   it, so the same base64 that works here would be double-encoded there. */
+async function createGraphDraft(token, d){
+  const rcpt = list => list.filter(Boolean).map(a => ({ emailAddress:{ address:a } }));
+  const res = await fetch('https://graph.microsoft.com/v1.0/me/messages', {
+    method:'POST',
+    headers:{ 'Authorization':'Bearer ' + token, 'Content-Type':'application/json' },
+    body: JSON.stringify({
+      subject: d.subject,
+      body: { contentType:'Text', content: d.body },
+      toRecipients: rcpt(d.to),
+      ccRecipients: rcpt(d.cc),
+      attachments: [{ '@odata.type':'#microsoft.graph.fileAttachment',
+        name: d.fileName, contentType:'application/pdf', contentBytes: d.pdfBase64 }]
+    })
+  });
+  if(!res.ok){
+    let msg = 'HTTP ' + res.status;
+    try{ const j = await res.json(); if(j && j.error && j.error.message) msg = j.error.message; }catch(e){}
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
 /* ---------- optional direct send via Power Automate ----------
    The user's flow ("WarrantyApp - Send Email": HTTP trigger → Outlook
    "Send an email V2") exists but sits Suspended until a Premium license
@@ -5893,42 +6020,86 @@ function autoEmailCurrentPdf(){
   }
   openAutoEmailReviewModal();
 }
-/* ✉ Send to email — builds a real Outlook draft (.eml) and hands it to the
-   browser. NO in-app review step by design: the draft opens in Outlook with
-   everything already filled and is not sent until the user presses Send there,
-   so reviewing twice was pure friction. Independent of Power Automate. */
+/* Downloads the draft as an .eml. The fallback route, used when Graph is not
+   configured or the PDF is too big for a createMessage request. */
+function downloadEmlDraft(d){
+  const join = list => list.join(', ');   // RFC 822 address lists are COMMA separated
+  const blob = buildEmlBlob({ to: join(d.to), cc: join(d.cc), subject: d.subject,
+    body: d.body, fileName: d.fileName, pdfBase64: d.pdfBase64 });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = d.fileName.replace(/\.pdf$/i, '') + '.eml';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=> URL.revokeObjectURL(url), 60000);   // let the download start first
+}
+
+/* ✉ Send to email — opens a real Outlook draft with To/CC/subject/body and the
+   PDF already attached. NO in-app review step by design: nothing is sent until
+   the user presses Send in Outlook, so reviewing twice was pure friction.
+   Independent of Power Automate.
+
+   Two routes, chosen by configuration — see the Graph section above for why
+   neither alone is enough:
+     Graph  — Client ID set and the PDF fits: creates the draft in the signed-in
+              user's OWN mailbox and opens it in Outlook on the WEB. Sign in
+              once; every send after that is silent.
+     .eml   — otherwise: downloads a draft file that opens in desktop Outlook. */
 async function sendEmailCurrentPdf(){
   if(!_pdfPreviewUrl) return;
   if(!_pdfBlob){ flashStatus('ไม่พบไฟล์ PDF — กดสร้าง PDF ใหม่อีกครั้ง', 5000); return; }
+
+  const tooBig = _pdfBlob.size > GRAPH_MAX_PDF_BYTES;
+  const useGraph = graphConfigured() && !tooBig;
+  // Reserve the tab INSIDE the click gesture: the Graph round-trip that follows
+  // would otherwise burn the activation and the draft would be popup-blocked.
+  const win = useGraph ? window.open('about:blank', '_blank') : null;
+  const closeWin = ()=>{ try{ if(win && !win.closed) win.close(); }catch(e){} };
+
   try{
     await loadSendEmailRecipients();     // its OWN directory, separate from Auto email's
     const rows = _sendEmailRecipientsCache || [];
-    // RFC 822 address lists are COMMA separated — the ';' that the Power
-    // Automate payload uses is not valid in a To:/Cc: header.
-    const addr = list => list.map(r => r.Email).filter(Boolean).join(', ');
-    const to = addr(rows.filter(r => r.Type !== 'cc'));
-    const cc = addr(rows.filter(r => r.Type === 'cc'));
-
+    const pick = cc => rows.filter(r => cc ? r.Type === 'cc' : r.Type !== 'cc')
+                           .map(r => r.Email).filter(Boolean);
+    const to = pick(false), cc = pick(true);
     // ASCII-safe attachment name: the same reason currentPdfFile(true) exists —
     // safe() deliberately keeps Thai in the PDF filename, and a raw non-ASCII
     // name in a MIME header would need RFC 2231 continuations to be legal.
-    const pdfName = (currentPdfFile(true) || {}).name || 'export_order.pdf';
-    const blob = buildEmlBlob({ to, cc, subject: pdfSubject(), body: _emailDraftText || '',
-      fileName: pdfName, pdfBase64: await blobToBase64(_pdfBlob) });
+    const fileName = (currentPdfFile(true) || {}).name || 'export_order.pdf';
+    const d = { to, cc, subject: pdfSubject(), body: _emailDraftText || '',
+                fileName, pdfBase64: await blobToBase64(_pdfBlob) };
 
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = pdfName.replace(/\.pdf$/i, '') + '.eml';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=> URL.revokeObjectURL(url), 60000);   // let the download start first
+    if(useGraph){
+      let token;
+      try{
+        token = await graphToken(false);          // silent only on the send path
+      }catch(e){
+        closeWin();
+        flashStatus('ยังไม่ได้ลงชื่อเข้าใช้ Outlook — ไปที่ ☰ → Send to email → 🌐 Outlook เว็บ แล้วกดลงชื่อเข้าใช้ (ทำครั้งเดียว)', 9000);
+        return;
+      }
+      const draft = await createGraphDraft(token, d);
+      const link = draft && draft.webLink;
+      if(!link) throw new Error('Graph ไม่ได้ส่ง webLink กลับมา');
+      if(win && !win.closed) win.location.href = link;
+      else window.open(link, '_blank', 'noopener');   // reserve was popup-blocked
+      commitPdfAction();
+      flashStatus(to.length
+        ? 'เปิด draft ใน Outlook เว็บแล้ว ✓ (แนบ PDF + ใส่ผู้รับให้แล้ว) — ตรวจแล้วกดส่ง'
+        : 'เปิด draft ใน Outlook เว็บแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ', 8000);
+      return;
+    }
 
+    downloadEmlDraft(d);
     commitPdfAction();
-    flashStatus(to
-      ? 'สร้างร่างอีเมลแล้ว ✓ เปิดไฟล์ .eml เพื่อเปิด draft ใน Outlook (แนบ PDF ให้แล้ว)'
-      : 'สร้างร่างอีเมลแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ', 8000);
+    flashStatus(tooBig
+      ? 'ไฟล์ใหญ่เกินกว่าจะสร้าง draft บนเว็บ — ดาวน์โหลดเป็นไฟล์ .eml แทน (แนบ PDF ให้แล้ว)'
+      : to.length
+        ? 'สร้างร่างอีเมลแล้ว ✓ เปิดไฟล์ .eml เพื่อเปิด draft ใน Outlook (แนบ PDF ให้แล้ว)'
+        : 'สร้างร่างอีเมลแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ', 8000);
   }catch(err){
-    flashStatus('สร้างร่างอีเมลไม่สำเร็จ: ' + (err && err.message ? err.message : err), 7000);
+    closeWin();
+    flashStatus('สร้างร่างอีเมลไม่สำเร็จ: ' + (err && err.message ? err.message : err), 8000);
   }
 }
 
@@ -6350,7 +6521,35 @@ const TH_EN = {
   /* ---- ✉ Send to email: ☰ row + its own settings page (mirrors ⚡'s shape) ---- */
   'ตั้งค่า Send to email — เปิด-ปิดปุ่ม, จัดการผู้รับ':'Send to email settings — turn the button on/off, manage recipients',
   'เปิดใช้งานปุ่ม Send to email':'Activate the Send to email button',
-  'แสดงปุ่ม ✉ ในเมนู 📄 (สร้างไฟล์ .eml เปิดเป็น draft ใน Outlook พร้อมแนบ PDF)':'Show ✉ in the 📄 menu (builds an .eml that opens as an Outlook draft with the PDF attached)',
+  'แสดงปุ่ม ✉ ในเมนู 📄 (เปิด draft ใน Outlook พร้อมแนบ PDF อัตโนมัติ)':'Show ✉ in the 📄 menu (opens an Outlook draft with the PDF already attached)',
+
+  /* ---- 🌐 Outlook web via Microsoft Graph ---- */
+  'Outlook เว็บ (Microsoft 365)':'Outlook on the web (Microsoft 365)',
+  '🌐 Outlook เว็บ (Microsoft 365)':'🌐 Outlook on the web (Microsoft 365)',
+  'ลงชื่อเข้าใช้ครั้งเดียว แล้วเปิด draft ใน Outlook เว็บอัตโนมัติทุกครั้ง':'Sign in once, then every send opens a draft in Outlook on the web automatically',
+  'ยังไม่ตั้งค่า':'Not set up',
+  'ยังไม่ได้ลงชื่อ':'Not signed in',
+  'ตั้งค่าครั้งเดียวสำหรับทั้งทีม แล้วแต่ละคนลงชื่อเข้าใช้ด้วยบัญชีตัวเอง — draft จะถูกสร้างในกล่องจดหมายของคนที่กดเอง ถ้าเว้นว่างไว้ ปุ่ม ✉ จะดาวน์โหลดเป็นไฟล์ .eml แทน':'Set up once for the whole team, then each person signs in with their own account — the draft is created in the mailbox of whoever pressed the button. Left empty, ✉ downloads an .eml file instead.',
+  'Redirect URI (คัดลอกไปใส่ใน Azure)':'Redirect URI (copy this into Azure)',
+  'บันทึกการตั้งค่า':'Save settings',
+  'ลงชื่อเข้าใช้ Outlook':'Sign in to Outlook',
+  /* 'ออกจากระบบ' → 'Sign out' is already defined for the Power-User logout and
+     translates this button too — a second identical entry would be a dup key. */
+  'สลับบัญชี':'Switch account',
+  '○ ยังไม่ได้ตั้งค่า — ปุ่ม ✉ จะดาวน์โหลดไฟล์ .eml แทน':'○ Not set up — ✉ downloads an .eml file instead',
+  '○ ตั้งค่าแล้ว แต่ยังไม่ได้ลงชื่อเข้าใช้ — กดปุ่มด้านล่าง (ทำครั้งเดียว)':'○ Set up, but not signed in — use the button below (one time only)',
+  'Client ID ต้องเป็น GUID เช่น 00000000-0000-0000-0000-000000000000':'The Client ID must be a GUID, e.g. 00000000-0000-0000-0000-000000000000',
+  'ใส่ Client ID แล้วกดบันทึกก่อน':'Enter a Client ID and save it first',
+  'บันทึกการตั้งค่า Outlook เว็บแล้ว (มีผลกับทุกคน)':'Outlook web settings saved (affects everyone)',
+  'ลงชื่อเข้าใช้แล้ว ✓ ครั้งต่อไปจะเปิด draft ให้อัตโนมัติ':'Signed in ✓ from now on the draft opens automatically',
+  'ยังไม่ได้ตั้งค่า Client ID':'No Client ID has been set',
+  'โหลดไลบรารีเข้าสู่ระบบไม่สำเร็จ':'Could not load the sign-in library',
+  'โหลดไลบรารีเข้าสู่ระบบไม่สำเร็จ — ต้องมีอินเทอร์เน็ต':'Could not load the sign-in library — an internet connection is required',
+  'Graph ไม่ได้ส่ง webLink กลับมา':'Graph did not return a webLink',
+  'ยังไม่ได้ลงชื่อเข้าใช้ Outlook — ไปที่ ☰ → Send to email → 🌐 Outlook เว็บ แล้วกดลงชื่อเข้าใช้ (ทำครั้งเดียว)':'Not signed in to Outlook — go to ☰ → Send to email → 🌐 Outlook on the web and sign in (one time only)',
+  'เปิด draft ใน Outlook เว็บแล้ว ✓ (แนบ PDF + ใส่ผู้รับให้แล้ว) — ตรวจแล้วกดส่ง':'Draft opened in Outlook on the web ✓ (PDF attached, recipients filled in) — check it and press Send',
+  'เปิด draft ใน Outlook เว็บแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ':'Draft opened in Outlook on the web ✓ but it has no recipients — add them under ☰ → Send to email → Manage recipients',
+  'ไฟล์ใหญ่เกินกว่าจะสร้าง draft บนเว็บ — ดาวน์โหลดเป็นไฟล์ .eml แทน (แนบ PDF ให้แล้ว)':'Too large to create a draft on the web — downloaded as an .eml file instead (PDF attached)',
   '● เปิดใช้งานอยู่ — ปุ่ม ✉ Send to email แสดงอยู่ในเมนู 📄':'● Active — the ✉ Send to email button is shown in the 📄 menu',
   '○ ปิดอยู่ — กดสวิตช์เพื่อเปิดใช้งาน':'○ Off — flip the switch to activate',
   'เปิดใช้งานปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)':'✉ Send to email button activated (affects everyone)',
@@ -6574,6 +6773,9 @@ const TH_EN_RULES = [
   [/^เพิ่มไม่สำเร็จ: (.*)$/, 'Add failed: $1'],
   [/^ส่งไม่สำเร็จ: (.*)$/, 'Send failed: $1'],
   [/^สร้างร่างอีเมลไม่สำเร็จ: (.*)$/, 'Could not build the email draft: $1'],
+  [/^ลงชื่อเข้าใช้ไม่สำเร็จ: (.*)$/, 'Sign-in failed: $1'],
+  [/^● ลงชื่อเข้าใช้เป็น (.+) — ปุ่ม ✉ จะเปิด draft ใน Outlook เว็บ$/,
+     '● Signed in as $1 — ✉ opens a draft in Outlook on the web'],
   [/^แชร์ถูกปฏิเสธ: (.*)$/, 'Share refused: $1'],
   [/^บันทึกรูปลงชีตไม่สำเร็จ: (.*)$/, 'Saving the photo to the sheet failed: $1'],
   [/^บันทึก URL ลงชีตไม่สำเร็จ: (.*)$/, 'Saving the URL to the sheet failed: $1'],
@@ -7095,8 +7297,15 @@ function openSendEmailSettingsModal(){
       <div class="se-status sp-status off">กำลังตรวจสอบ...</div>
       <button type="button" class="sp-row se-activate">
         <span class="tm-ic">✉</span>
-        <span class="sp-txt"><b>เปิดใช้งานปุ่ม Send to email</b><span>แสดงปุ่ม ✉ ในเมนู 📄 (สร้างไฟล์ .eml เปิดเป็น draft ใน Outlook พร้อมแนบ PDF)</span></span>
+        <span class="sp-txt"><b>เปิดใช้งานปุ่ม Send to email</b><span>แสดงปุ่ม ✉ ในเมนู 📄 (เปิด draft ใน Outlook พร้อมแนบ PDF อัตโนมัติ)</span></span>
         <span class="tm-sw se-sw"></span>
+      </button>
+      <div class="tm-sep" style="margin:2px 0;"></div>
+      <button type="button" class="sp-row se-graph">
+        <span class="tm-ic">🌐</span>
+        <span class="sp-txt"><b>Outlook เว็บ (Microsoft 365)</b><span>ลงชื่อเข้าใช้ครั้งเดียว แล้วเปิด draft ใน Outlook เว็บอัตโนมัติทุกครั้ง</span></span>
+        <span class="tm-val se-graph-val"></span>
+        <span class="tm-chev">›</span>
       </button>
       <div class="tm-sep" style="margin:2px 0;"></div>
       <button type="button" class="sp-row se-recipients">
@@ -7120,6 +7329,10 @@ function openSendEmailSettingsModal(){
     ov.querySelector('.se-sw').classList.toggle('on', on);
     setStatus(on ? 'on' : 'off',
       on ? '● เปิดใช้งานอยู่ — ปุ่ม ✉ Send to email แสดงอยู่ในเมนู 📄' : '○ ปิดอยู่ — กดสวิตช์เพื่อเปิดใช้งาน');
+    // Which of the two delivery routes is live right now, in one word.
+    const who = graphSignedInAs();
+    ov.querySelector('.se-graph-val').textContent =
+      !graphConfigured() ? 'ยังไม่ตั้งค่า' : (who || 'ยังไม่ได้ลงชื่อ');
   };
   render();
 
@@ -7130,7 +7343,106 @@ function openSendEmailSettingsModal(){
     flashStatus(nextHidden ? 'ปิดใช้งานปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)' : 'เปิดใช้งานปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)', 5000);
   };
 
+  ov.querySelector('.se-graph').onclick = ()=>openGraphSettingsModal(render);
   ov.querySelector('.se-recipients').onclick = ()=>openSendEmailRecipientsModal();
+}
+
+/* ---------- 🌐 Outlook web (Microsoft Graph) settings ----------
+   Holds the shared Azure app registration and the per-device sign-in. The
+   Client ID / Tenant ID are app-wide (saved to appSettings, so a Power User
+   configures them once for the whole team); the SIGN-IN is per person and
+   per browser, cached by MSAL in localStorage — that is the "log in once"
+   part. onDone re-renders the parent page so its status line stays truthful. */
+function openGraphSettingsModal(onDone){
+  const ov = document.createElement('div');
+  ov.className = 'edit-part-modal open';
+  ov.innerHTML = `<div class="edit-part-dialog">
+    <div class="epm-head"><span>🌐 Outlook เว็บ (Microsoft 365)</span><button type="button" class="epm-x">✕</button></div>
+    <div class="epm-body">
+      <div class="gr-status sp-status off">กำลังตรวจสอบ...</div>
+      <div class="epm-note">ตั้งค่าครั้งเดียวสำหรับทั้งทีม แล้วแต่ละคนลงชื่อเข้าใช้ด้วยบัญชีตัวเอง — draft จะถูกสร้างในกล่องจดหมายของคนที่กดเอง ถ้าเว้นว่างไว้ ปุ่ม ✉ จะดาวน์โหลดเป็นไฟล์ .eml แทน</div>
+      <label>Application (client) ID<input type="text" class="gr-client" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" spellcheck="false"></label>
+      <label>Directory (tenant) ID<input type="text" class="gr-tenant" placeholder="common" autocomplete="off" spellcheck="false"></label>
+      <label>Redirect URI (คัดลอกไปใส่ใน Azure)<input type="text" class="gr-redirect" readonly onclick="this.select()"></label>
+      <div class="db-status-line err gr-err" style="display:none;"></div>
+      <button type="button" class="btn btn-primary gr-save" style="width:100%;margin-top:4px;">บันทึกการตั้งค่า</button>
+      <div class="tm-sep" style="margin:10px 0;"></div>
+      <button type="button" class="btn gr-signin" style="width:100%;">ลงชื่อเข้าใช้ Outlook</button>
+      <button type="button" class="btn gr-signout" style="width:100%;margin-top:6px;color:var(--red);border-color:var(--red);">ออกจากระบบ</button>
+    </div>
+    <div class="epm-actions"><button type="button" class="btn gr-close">ปิด</button></div>
+  </div>`;
+  ov.querySelector('.epm-x').onclick = ()=>userDismissTopModal();
+  ov.querySelector('.gr-close').onclick = ()=>userDismissTopModal();
+  ov.addEventListener('click', e=>{ if(e.target===ov) userDismissTopModal(); });
+  document.body.appendChild(ov);
+  modalOpened();
+
+  const statusEl = ov.querySelector('.gr-status');
+  const errEl = ov.querySelector('.gr-err');
+  const clientInp = ov.querySelector('.gr-client'), tenantInp = ov.querySelector('.gr-tenant');
+  const showErr = m => { errEl.textContent = m; errEl.style.display = m ? '' : 'none'; };
+  const setStatus = (cls, txt)=>{ statusEl.className = 'gr-status sp-status ' + cls; statusEl.textContent = txt; };
+
+  clientInp.value = graphClientId();
+  tenantInp.value = String(appSettings.graphTenantId || 'common');
+  ov.querySelector('.gr-redirect').value = graphRedirectUri();
+
+  const render = ()=>{
+    const who = graphSignedInAs();
+    if(!graphConfigured()) setStatus('off', '○ ยังไม่ได้ตั้งค่า — ปุ่ม ✉ จะดาวน์โหลดไฟล์ .eml แทน');
+    else if(who) setStatus('on', '● ลงชื่อเข้าใช้เป็น ' + who + ' — ปุ่ม ✉ จะเปิด draft ใน Outlook เว็บ');
+    else setStatus('off', '○ ตั้งค่าแล้ว แต่ยังไม่ได้ลงชื่อเข้าใช้ — กดปุ่มด้านล่าง (ทำครั้งเดียว)');
+    ov.querySelector('.gr-signout').style.display = who ? '' : 'none';
+    ov.querySelector('.gr-signin').textContent = who ? 'สลับบัญชี' : 'ลงชื่อเข้าใช้ Outlook';
+    if(typeof onDone === 'function') onDone();
+  };
+  // Rebuilding the MSAL app is what surfaces an already-cached account after a
+  // reload, so the status line can say who is signed in before anything is sent.
+  getMsalApp().then(render).catch(()=>render());
+  render();
+
+  ov.querySelector('.gr-save').onclick = async ()=>{
+    showErr('');
+    const id = clientInp.value.trim();
+    // A GUID is the only thing Azure ever issues here; catching a paste of the
+    // wrong field (secret, object id, URL) now beats an opaque MSAL error later.
+    if(id && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)){
+      showErr('Client ID ต้องเป็น GUID เช่น 00000000-0000-0000-0000-000000000000'); return;
+    }
+    const btn = ov.querySelector('.gr-save'); btn.disabled = true;
+    try{
+      await saveAppSettings({ graphClientId: id, graphTenantId: tenantInp.value.trim() || 'common' });
+      _msalApp = null; _msalKey = '';       // force a rebuild against the new config
+      await getMsalApp().catch(()=>{});
+      render();
+      flashStatus('บันทึกการตั้งค่า Outlook เว็บแล้ว (มีผลกับทุกคน)', 5000);
+    }catch(err){ showErr('บันทึกไม่สำเร็จ: ' + (err && err.message ? err.message : err)); }
+    btn.disabled = false;
+  };
+
+  ov.querySelector('.gr-signin').onclick = async ()=>{
+    showErr('');
+    if(!graphConfigured()){ showErr('ใส่ Client ID แล้วกดบันทึกก่อน'); return; }
+    const btn = ov.querySelector('.gr-signin'); btn.disabled = true;
+    try{
+      await graphToken(true);               // interactive — this is the one-time login
+      render();
+      flashStatus('ลงชื่อเข้าใช้แล้ว ✓ ครั้งต่อไปจะเปิด draft ให้อัตโนมัติ', 6000);
+    }catch(err){
+      showErr('ลงชื่อเข้าใช้ไม่สำเร็จ: ' + (err && err.message ? err.message : err));
+    }
+    btn.disabled = false;
+  };
+
+  ov.querySelector('.gr-signout').onclick = async ()=>{
+    try{
+      const app = await getMsalApp();
+      const acc = app && (app.getActiveAccount() || app.getAllAccounts()[0]);
+      if(app && acc) await app.logoutPopup({ account: acc });
+    }catch(err){ /* a cancelled logout popup is not an error worth showing */ }
+    render();
+  };
 }
 
 /* ---------- 👥 Send to email recipients (SEPARATE from Auto email's own
