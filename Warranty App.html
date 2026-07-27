@@ -1683,10 +1683,12 @@ function fmtToolbarOn(){ return !!appSettings.fmtToolbar; }
 function paSendOn(){ return !!appSettings.paSend; }
 /* ✉ Send to email has two delivery mechanisms and picks by configuration:
    a Client ID present = create a real draft in the user's OWN mailbox through
-   Microsoft Graph and open it in Outlook on the web; empty = fall back to the
-   .eml download. The Azure app registration is shared by the whole team (one
-   registration, each person signs in as themselves), which is why it lives in
-   the server-side appSettings rather than per-device storage. */
+   Microsoft Graph and open it in Outlook on the web; empty = fall back to an
+   Outlook web compose deeplink (no real attachment, less reliable auto-fill —
+   see the section above `webComposeUrl`). The Azure app registration is
+   shared by the whole team (one registration, each person signs in as
+   themselves), which is why it lives in the server-side appSettings rather
+   than per-device storage. */
 function graphClientId(){ return String(appSettings.graphClientId || '').trim(); }
 function graphConfigured(){ return !!graphClientId(); }
 // Two independent buttons in the 📄 preview menu, each with its own Power-User
@@ -5697,18 +5699,16 @@ function pdfSubject(){
 }
 /* ==================== ส่งออก: การแบ่งหน้าที่ ====================
    ✉ Send to email — ผู้รับมาจากสมุดรายชื่อของตัวเอง 👥 (To/CC ไม่พิมพ์ต่อ
-       ออเดอร์) → สร้างไฟล์ .eml (To/CC/หัวข้อ/เนื้อหา + แนบ PDF จริง) แล้ว
-       ดาวน์โหลด → เปิดไฟล์ = ได้ draft ใน Outlook ของผู้ใช้เอง ไม่ตรวจทาน
-       ในแอป เพราะ draft คือขั้นตอนตรวจทานอยู่แล้ว
+       ออเดอร์) → Graph (ถ้าตั้งค่า Azure ไว้): draft จริงพร้อมไฟล์แนบใน
+       Outlook เว็บ, per-user, auto-fill เชื่อถือได้ · ไม่ได้ตั้งค่า: เปิด
+       Outlook เว็บ compose deeplink แทน — PDF เป็นลิงก์ Drive ในเนื้อหา
+       (ไม่ใช่ไฟล์แนบจริง) และบางครั้ง Outlook อาจดรอปค่า auto-fill ถ้า
+       session หมดอายุพอดี ทั้งสองทางไม่มีขั้นตอนตรวจทานในแอป เพราะ draft/
+       compose window คือขั้นตอนตรวจทานอยู่แล้ว
    ⚡ Auto email — ส่งจริงพร้อมไฟล์แนบทันทีผ่าน Power Automate flow ไม่เปิด
        แอปใด จึงยัง "ตรวจทานก่อนส่ง" ในแอปอยู่ (ครั้งเดียวที่จะทันดู)
    📤 Share — ส่งไฟล์ PDF เข้า "แชท/แอปอื่นใดก็ได้" ผ่าน OS share sheet
        สำเร็จ = จบที่ share sheet; ล้มเหลว = ชี้ไปปุ่ม Save PDF เท่านั้น */
-
-function isMobileDevice(){
-  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-    || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent)); // iPadOS masquerades as Mac
-}
 
 /* Synchronous on purpose: navigator.share() only works inside the tap's user
    gesture, and awaiting a fetch first eats that gesture on mobile browsers —
@@ -5767,26 +5767,27 @@ async function copyMessageQuiet(){
   try{ await navigator.clipboard.writeText(_emailDraftText || ''); return true; }catch(e){ return false; }
 }
 
-/* ---------- ✉ Send to email — a real Outlook draft, assembled as an .eml ----------
-   Every URL-based route was tried over this project's life and each one fails
-   a hard requirement: mailto: and outlook.office.com/mail/deeplink/compose
-   cannot carry an ATTACHMENT at all — and the deeplink additionally DROPS its
-   own query params whenever the tab has to re-authenticate, which is why
-   To/CC/subject/body were arriving blank in the field. The Web Share sheet
-   does attach the file but leaves To empty and is refused outright by the
-   team's Android phones. Power Automate attaches properly, but an
-   HTTP-triggered flow always runs as its OWNER, so every draft it created
-   would land in one person's mailbox — not per-user, which is a requirement.
+/* ---------- ✉ Send to email — Outlook WEB compose deeplink ----------
+   ⚡ Auto email and this button need different infrastructure: Auto email's
+   Power Automate flow needs a Premium licence (already in place); this
+   button's PREFERRED path, Microsoft Graph (see the section below), needs an
+   Azure app registration — and nobody at this org currently has Azure Portal
+   access to set that up. Until that changes, this falls back to the Outlook
+   web COMPOSE DEEPLINK, on every device — this app has stood on "always the
+   browser, never a mobile deep-link app" since `14b6ca5`, and this doesn't
+   reopen that.
 
-   An .eml file has none of those limits. The whole RFC 822 message is built
-   here — To, Cc, Subject, body AND the PDF as a real MIME part — and handed
-   to the browser as a download. Opening it launches the user's OWN Outlook
-   with a fully populated, editable draft. That draft IS the review step,
-   which is why this path has no in-app review modal (⚡ Auto email keeps
-   its own, because that one really does send on confirm).
-
-   `X-Unsent: 1` is the header that makes Outlook open it as a composable
-   draft with a Send button instead of as a received message. */
+   Two honest limits, accepted as the price of not needing Azure:
+     - a compose deeplink cannot carry a real attachment, so the PDF rides as
+       a Drive link in the body instead (the upload is best-effort — a failed
+       upload still opens Outlook, just with a note to attach the file by
+       hand via ⬇ Save PDF);
+     - Outlook sometimes drops its own query params (To/CC/Subject/body) when
+       the tab has to re-authenticate first — a documented Microsoft-side
+       behaviour this app cannot detect or work around; when it happens the
+       fields just need filling in by hand once Outlook is open.
+   Graph has neither limit, which is exactly why it stays preferred whenever a
+   Client ID is configured — this is the fallback for when it isn't. */
 function blobToBase64(blob){
   return new Promise((resolve, reject)=>{
     const reader = new FileReader();
@@ -5796,63 +5797,19 @@ function blobToBase64(blob){
   });
 }
 
-/* btoa() only accepts latin1, so UTF-8 text (every Thai subject and body here)
-   has to be widened to bytes first or it throws. */
-function b64Utf8(str){
-  const bytes = new TextEncoder().encode(str);
-  let bin = '';
-  for(let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return btoa(bin);
-}
-/* RFC 2045 caps a MIME body line at 76 chars. */
-const b64Wrap = b64 => b64.replace(/.{1,76}/g, '$&\r\n');
-
-/* RFC 2047 encoded-words: a header cannot hold raw UTF-8, and each word is
-   capped at 75 chars. Chunk the SOURCE by encoded BYTE length so the budget
-   holds for Thai (3 bytes/char) as well as ASCII: 39 bytes → 52 base64 chars,
-   + the 12-char "=?UTF-8?B?…?=" wrapper = 64, which still leaves room for the
-   9-char "Subject: " prefix inside the 76-char line limit. Iterating with
-   for..of walks code POINTS, not UTF-16 units, so a multi-byte character is
-   never split down the middle. Pure-ASCII subjects are passed through
-   unencoded so the common case stays readable in the raw file. */
-function encodeHeaderWord(str){
-  if(!/[^\x20-\x7E]/.test(str)) return str;
-  const enc = new TextEncoder();
-  const chunks = [];
-  let cur = '', curLen = 0;
-  for(const ch of str){
-    const n = enc.encode(ch).length;
-    if(curLen + n > 39){ chunks.push(cur); cur = ''; curLen = 0; }
-    cur += ch; curLen += n;
-  }
-  if(cur) chunks.push(cur);
-  return chunks.map(c => '=?UTF-8?B?' + b64Utf8(c) + '?=').join('\r\n ');
-}
-
-/* pdfBase64 is plain base64 of the PDF bytes. It drops straight into a part
-   already declared `Content-Transfer-Encoding: base64`, so — unlike the Power
-   Automate path, where a `format: byte` field re-encodes what it is given —
-   there is no second encoding step here to get wrong. */
-function buildEmlBlob(opts){
-  const boundary = '----WarrantyApp' + Date.now().toString(36);
-  const head = ['X-Unsent: 1'];
-  if(opts.to) head.push('To: ' + opts.to);
-  if(opts.cc) head.push('Cc: ' + opts.cc);
-  head.push('Subject: ' + encodeHeaderWord(opts.subject || ''));
-  head.push('MIME-Version: 1.0');
-  head.push('Content-Type: multipart/mixed; boundary="' + boundary + '"');
-  const eml = head.join('\r\n') + '\r\n\r\n'
-    + '--' + boundary + '\r\n'
-    + 'Content-Type: text/plain; charset="utf-8"\r\n'
-    + 'Content-Transfer-Encoding: base64\r\n\r\n'
-    + b64Wrap(b64Utf8(opts.body || '')) + '\r\n'
-    + '--' + boundary + '\r\n'
-    + 'Content-Type: application/pdf; name="' + opts.fileName + '"\r\n'
-    + 'Content-Transfer-Encoding: base64\r\n'
-    + 'Content-Disposition: attachment; filename="' + opts.fileName + '"\r\n\r\n'
-    + b64Wrap(opts.pdfBase64) + '\r\n'
-    + '--' + boundary + '--\r\n';
-  return new Blob([eml], { type:'message/rfc822' });
+/* This text ends up inside the OUTGOING EMAIL, never a DOM text node, so
+   applyI18n can't reach it — translate at the call site via t(). Recipients
+   are SEMICOLON separated, matching how Outlook displays them and how the
+   ⚡ Auto email payload already joins them. */
+function webComposeUrl(subject, body, uploadedUrl, to, cc){
+  const enc = encodeURIComponent;
+  const fullBody = body + (uploadedUrl
+    ? '\n\n' + t('📎 ไฟล์ PDF:') + ' ' + uploadedUrl
+    : '\n\n' + t('[แนบไฟล์ PDF ก่อนส่ง — กด ⬇ Save PDF ในแอปเพื่อดาวน์โหลดไฟล์]'));
+  let url = 'https://outlook.office.com/mail/deeplink/compose?subject=' + enc(subject) + '&body=' + enc(fullBody);
+  if(to) url += '&to=' + enc(to);
+  if(cc) url += '&cc=' + enc(cc);
+  return url;
 }
 
 /* ---------- ✉ Send to email — Outlook on the WEB, via Microsoft Graph ----------
@@ -5869,7 +5826,7 @@ function buildEmlBlob(opts){
 
    Requires an Azure "Single-page application" registration with the delegated
    Mail.ReadWrite scope. Until a Client ID is saved, sendEmailCurrentPdf falls
-   back to the .eml download above, so the button keeps working regardless. */
+   back to the compose deeplink above, so the button keeps working regardless. */
 const MSAL_CDN = 'https://cdn.jsdelivr.net/npm/@azure/msal-browser@5.17.1/lib/msal-browser.min.js';
 const GRAPH_SCOPES = ['Mail.ReadWrite'];
 /* Graph's own split: an attachment under 3 MB rides inside the createMessage
@@ -6063,73 +6020,29 @@ function autoEmailCurrentPdf(){
   }
   openAutoEmailReviewModal();
 }
-/* Downloads the draft as an .eml. The fallback route, used when Graph is not
-   configured or the PDF is too big for a createMessage request. */
-function downloadEmlDraft(d){
-  const join = list => list.join(', ');   // RFC 822 address lists are COMMA separated
-  const blob = buildEmlBlob({ to: join(d.to), cc: join(d.cc), subject: d.subject,
-    body: d.body, fileName: d.fileName, pdfBase64: d.pdfBase64 });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = d.fileName.replace(/\.pdf$/i, '') + '.eml';
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=> URL.revokeObjectURL(url), 60000);   // let the download start first
-}
+/* ✉ Send to email — opens a real Outlook draft with To/CC/subject/body, and
+   the PDF attached (Graph) or linked (deeplink — see above for the trade-off).
+   NO in-app review step by design: nothing is sent until the user presses
+   Send in Outlook, so reviewing twice was pure friction. Independent of
+   Power Automate.
 
-/* Pre-Graph fallback for PHONES. A .eml is a desktop-Outlook format — phones
-   just download a file they cannot open — so hand the PDF to the OS share
-   sheet instead, which is the one route that reliably lands a real attachment
-   in Outlook mobile. To/CC cannot ride along (a share sheet carries no
-   recipients), so the subject+body go to the clipboard to paste.
-
-   navigator.share MUST be the first gesture-consuming call: awaiting anything
-   beforehand — a fetch, a FileReader — eats the tap's activation on mobile and
-   the sheet then silently never opens. That is why this loads no recipients
-   and computes no base64 before calling it. */
-async function sendEmailViaShareSheet(){
-  const res = await shareFileViaSheet(pdfSubject());
-  if(res.ok){
-    commitPdfAction();
-    const copied = await copyMessageQuiet();
-    flashStatus(copied
-      ? 'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — คัดลอกหัวข้อ+เนื้อหาไว้ให้แล้ว วางในอีเมลได้เลย'
-      : 'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — หัวข้อ+เนื้อหาคัดลอกได้จากปุ่ม คัดลอก ในหน้าพรีวิว', 9000);
-    return;
-  }
-  // Nothing left the app → no ledger write and no run-number burn.
-  if(res.stage === 'cancelled') return;
-  if(res.stage === 'busy'){ flashStatus('การแชร์ครั้งก่อนยังค้างอยู่ — รอสักครู่แล้วลองใหม่', 5000); return; }
-  flashStatus(res.stage === 'no-api' || res.stage === 'no-file-share'
-    ? 'มือถือนี้แชร์ไฟล์ไม่ได้ — ให้ Power User ตั้งค่า 🌐 Outlook เว็บ เพื่อเปิด draft อัตโนมัติ'
-    : 'แชร์ไม่สำเร็จ: ' + (res.err && res.err.name || 'error') + ' — หรือกด ⬇ Save PDF แล้วแนบเอง', 9000);
-}
-
-/* ✉ Send to email — opens a real Outlook draft with To/CC/subject/body and the
-   PDF already attached. NO in-app review step by design: nothing is sent until
-   the user presses Send in Outlook, so reviewing twice was pure friction.
-   Independent of Power Automate.
-
-   Three routes. Graph is the only one that delivers everything at once, and it
-   handles ANY file size, so the other two exist purely for the window before
-   an Azure app registration is configured:
-     Graph — Client ID set: creates the draft in the signed-in user's OWN
-             mailbox and opens it in Outlook on the WEB, on phone and desktop
-             alike. Sign in once; every send after that is silent.
-     share — no Client ID, on a phone: OS share sheet (see above).
-     .eml  — no Client ID, on desktop: a draft file Outlook opens fully filled. */
+   Graph — Client ID configured: real attachment, everything auto-filled
+           reliably, per-user. Preferred whenever available.
+   deeplink — no Client ID: the fallback documented above. */
 async function sendEmailCurrentPdf(){
   if(!_pdfPreviewUrl) return;
   if(!_pdfBlob){ flashStatus('ไม่พบไฟล์ PDF — กดสร้าง PDF ใหม่อีกครั้ง', 5000); return; }
 
   const useGraph = graphConfigured();
-  // Both branches below claim something that REQUIRES the tap's own activation
-  // — the share sheet, or the reserved tab — so the route has to be decided
-  // synchronously here, before the first await.
-  if(!useGraph && isMobileDevice()) return sendEmailViaShareSheet();
-
-  const win = useGraph ? window.open('about:blank', '_blank') : null;
+  // Reserve the tab INSIDE the click gesture, before any await — both routes
+  // below do async work (a Graph call, or a Drive upload) that would burn the
+  // tap's activation and get a LATER window.open popup-blocked.
+  const win = window.open('about:blank', '_blank');
   const closeWin = ()=>{ try{ if(win && !win.closed) win.close(); }catch(e){} };
+  const openReserved = url=>{
+    if(win && !win.closed){ win.location.href = url; return true; }
+    return !!window.open(url, '_blank', 'noopener');   // reserve was popup-blocked
+  };
 
   try{
     await loadSendEmailRecipients();     // its OWN directory, separate from Auto email's
@@ -6139,12 +6052,9 @@ async function sendEmailCurrentPdf(){
     const to = pick(false), cc = pick(true);
     // ASCII-safe attachment name: the same reason currentPdfFile(true) exists —
     // safe() deliberately keeps Thai in the PDF filename, and a raw non-ASCII
-    // name in a MIME header would need RFC 2231 continuations to be legal.
+    // name would need extra encoding to be legal wherever it ends up.
     const fileName = (currentPdfFile(true) || {}).name || 'export_order.pdf';
-    // Graph takes the Blob (it may need to slice it into ranges); the .eml
-    // builder takes base64, so that conversion happens only on that branch.
-    const d = { to, cc, subject: pdfSubject(), body: _emailDraftText || '',
-                fileName, pdfBlob: _pdfBlob };
+    const subject = pdfSubject(), body = _emailDraftText || '';
 
     if(useGraph){
       let token;
@@ -6155,11 +6065,10 @@ async function sendEmailCurrentPdf(){
         flashStatus('ยังไม่ได้ลงชื่อเข้าใช้ Outlook — ไปที่ ☰ → Send to email → 🌐 Outlook เว็บ แล้วกดลงชื่อเข้าใช้ (ทำครั้งเดียว)', 9000);
         return;
       }
-      const draft = await createGraphDraft(token, d);
+      const draft = await createGraphDraft(token, { to, cc, subject, body, fileName, pdfBlob:_pdfBlob });
       const link = draft && draft.webLink;
       if(!link) throw new Error('Graph ไม่ได้ส่ง webLink กลับมา');
-      if(win && !win.closed) win.location.href = link;
-      else window.open(link, '_blank', 'noopener');   // reserve was popup-blocked
+      if(!openReserved(link)) throw new Error('เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปสำหรับเว็บนี้แล้วลองใหม่');
       commitPdfAction();
       flashStatus(to.length
         ? 'เปิด draft ใน Outlook เว็บแล้ว ✓ (แนบ PDF + ใส่ผู้รับให้แล้ว) — ตรวจแล้วกดส่ง'
@@ -6167,11 +6076,26 @@ async function sendEmailCurrentPdf(){
       return;
     }
 
-    downloadEmlDraft(Object.assign({}, d, { pdfBase64: await blobToBase64(_pdfBlob) }));
+    // Upload is BEST-EFFORT: a failure (offline, backend hiccup) must never
+    // stop Outlook from opening — webComposeUrl swaps the file link for an
+    // "attach it yourself" note instead.
+    let uploadedUrl = '', uploadErr = '';
+    try{
+      const base64 = await blobToBase64(_pdfBlob);
+      const r = await lookupApiCall('uploadPdf', { base64, filename: fileName });
+      uploadedUrl = r.url || '';
+      if(r.shared === false) flashStatus('อัพโหลดแล้ว แต่เปิดลิงก์สาธารณะไม่ได้ — ผู้รับอาจต้องขอสิทธิ์เข้าถึงไฟล์', 7000);
+    }catch(upErr){
+      uploadErr = (upErr && upErr.message) ? upErr.message : String(upErr);
+    }
+
+    const url = webComposeUrl(subject, body, uploadedUrl, to.join(';'), cc.join(';'));
+    if(!openReserved(url)) throw new Error('เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปสำหรับเว็บนี้แล้วลองใหม่ หรือกด ⬇ Save PDF แล้วแนบเอง');
     commitPdfAction();
-    flashStatus(to.length
-      ? 'สร้างร่างอีเมลแล้ว ✓ เปิดไฟล์ .eml เพื่อเปิด draft ใน Outlook (แนบ PDF ให้แล้ว)'
-      : 'สร้างร่างอีเมลแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ', 8000);
+    flashStatus(uploadedUrl
+      ? (to.length ? 'เปิด Outlook เว็บแล้ว ✓ (ลิงก์ PDF อยู่ในเนื้อหา) — ตรวจผู้รับแล้วกดส่ง'
+                   : 'เปิด Outlook เว็บแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ')
+      : 'เปิด Outlook เว็บแล้ว — แต่อัพโหลดไฟล์ไม่สำเร็จ (' + uploadErr + ') · กด ⬇ Save PDF แล้วแนบเอง', 8000);
   }catch(err){
     closeWin();
     flashStatus('สร้างร่างอีเมลไม่สำเร็จ: ' + (err && err.message ? err.message : err), 8000);
@@ -6596,7 +6520,7 @@ const TH_EN = {
   /* ---- ✉ Send to email: ☰ row + its own settings page (mirrors ⚡'s shape) ---- */
   'ตั้งค่า Send to email — เปิด-ปิดปุ่ม, จัดการผู้รับ':'Send to email settings — turn the button on/off, manage recipients',
   'เปิดใช้งานปุ่ม Send to email':'Activate the Send to email button',
-  'แสดงปุ่ม ✉ ในเมนู 📄 (เปิด draft ใน Outlook พร้อมแนบ PDF อัตโนมัติ)':'Show ✉ in the 📄 menu (opens an Outlook draft with the PDF already attached)',
+  'แสดงปุ่ม ✉ ในเมนู 📄 (เปิด draft ใน Outlook เว็บให้อัตโนมัติ — ดูขั้นตอน 🌐 ด้านล่างสำหรับการแนบ PDF จริง)':'Show ✉ in the 📄 menu (opens a draft in Outlook on the web automatically — see 🌐 below for a real PDF attachment)',
 
   /* ---- 🌐 Outlook web via Microsoft Graph ---- */
   'Outlook เว็บ (Microsoft 365)':'Outlook on the web (Microsoft 365)',
@@ -6604,14 +6528,14 @@ const TH_EN = {
   'ลงชื่อเข้าใช้ครั้งเดียว แล้วเปิด draft ใน Outlook เว็บอัตโนมัติทุกครั้ง':'Sign in once, then every send opens a draft in Outlook on the web automatically',
   'ยังไม่ตั้งค่า':'Not set up',
   'ยังไม่ได้ลงชื่อ':'Not signed in',
-  'ตั้งค่าครั้งเดียวสำหรับทั้งทีม แล้วแต่ละคนลงชื่อเข้าใช้ด้วยบัญชีตัวเอง — draft จะถูกสร้างในกล่องจดหมายของคนที่กดเอง ถ้าเว้นว่างไว้ ปุ่ม ✉ จะดาวน์โหลดเป็นไฟล์ .eml แทน':'Set up once for the whole team, then each person signs in with their own account — the draft is created in the mailbox of whoever pressed the button. Left empty, ✉ downloads an .eml file instead.',
+  'ตั้งค่าครั้งเดียวสำหรับทั้งทีม แล้วแต่ละคนลงชื่อเข้าใช้ด้วยบัญชีตัวเอง — draft จะถูกสร้างในกล่องจดหมายของคนที่กดเอง ถ้าเว้นว่างไว้ ปุ่ม ✉ จะเปิด Outlook เว็บแบบไม่มีไฟล์แนบจริงแทน (แนบเป็นลิงก์แทน)':'Set up once for the whole team, then each person signs in with their own account — the draft is created in the mailbox of whoever pressed the button. Left empty, ✉ opens Outlook web without a real attachment instead (a link stands in for it).',
   'Redirect URI (คัดลอกไปใส่ใน Azure)':'Redirect URI (copy this into Azure)',
   'บันทึกการตั้งค่า':'Save settings',
   'ลงชื่อเข้าใช้ Outlook':'Sign in to Outlook',
   /* 'ออกจากระบบ' → 'Sign out' is already defined for the Power-User logout and
      translates this button too — a second identical entry would be a dup key. */
   'สลับบัญชี':'Switch account',
-  '○ ยังไม่ได้ตั้งค่า — ปุ่ม ✉ จะดาวน์โหลดไฟล์ .eml แทน':'○ Not set up — ✉ downloads an .eml file instead',
+  '○ ยังไม่ได้ตั้งค่า — ปุ่ม ✉ จะเปิด Outlook เว็บแบบไม่มีไฟล์แนบจริงแทน':'○ Not set up — ✉ opens Outlook web without a real attachment instead',
   '○ ตั้งค่าแล้ว แต่ยังไม่ได้ลงชื่อเข้าใช้ — กดปุ่มด้านล่าง (ทำครั้งเดียว)':'○ Set up, but not signed in — use the button below (one time only)',
   'Client ID ต้องเป็น GUID เช่น 00000000-0000-0000-0000-000000000000':'The Client ID must be a GUID, e.g. 00000000-0000-0000-0000-000000000000',
   'ใส่ Client ID แล้วกดบันทึกก่อน':'Enter a Client ID and save it first',
@@ -6626,9 +6550,13 @@ const TH_EN = {
   'เปิด draft ใน Outlook เว็บแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ':'Draft opened in Outlook on the web ✓ but it has no recipients — add them under ☰ → Send to email → Manage recipients',
   'Graph ไม่ได้ส่ง uploadUrl กลับมา':'Graph did not return an uploadUrl',
   'Graph ไม่ได้ส่ง id ของ draft กลับมา':'Graph did not return a draft id',
-  'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — คัดลอกหัวข้อ+เนื้อหาไว้ให้แล้ว วางในอีเมลได้เลย':'Shared to Outlook ✓ (PDF attached) — the subject and body are on the clipboard, just paste them in',
-  'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — หัวข้อ+เนื้อหาคัดลอกได้จากปุ่ม คัดลอก ในหน้าพรีวิว':'Shared to Outlook ✓ (PDF attached) — copy the subject and body with the Copy button on the preview screen',
-  'มือถือนี้แชร์ไฟล์ไม่ได้ — ให้ Power User ตั้งค่า 🌐 Outlook เว็บ เพื่อเปิด draft อัตโนมัติ':'This phone cannot share files — ask a Power User to set up 🌐 Outlook on the web so drafts open automatically',
+  'เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปสำหรับเว็บนี้แล้วลองใหม่':'The browser blocked the popup — allow popups for this site and try again',
+  'เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปสำหรับเว็บนี้แล้วลองใหม่ หรือกด ⬇ Save PDF แล้วแนบเอง':'The browser blocked the popup — allow popups for this site and try again, or tap ⬇ Save PDF and attach it yourself',
+  '📎 ไฟล์ PDF:':'📎 PDF file:',
+  '[แนบไฟล์ PDF ก่อนส่ง — กด ⬇ Save PDF ในแอปเพื่อดาวน์โหลดไฟล์]':'[Attach the PDF before sending — tap ⬇ Save PDF in the app to download it]',
+  'อัพโหลดแล้ว แต่เปิดลิงก์สาธารณะไม่ได้ — ผู้รับอาจต้องขอสิทธิ์เข้าถึงไฟล์':'Uploaded, but the link could not be made public — recipients may have to request access',
+  'เปิด Outlook เว็บแล้ว ✓ (ลิงก์ PDF อยู่ในเนื้อหา) — ตรวจผู้รับแล้วกดส่ง':'Outlook web opened ✓ (the PDF link is in the body) — check the recipients and send',
+  'เปิด Outlook เว็บแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ':'Outlook web opened ✓ but it has no recipients — add them under ☰ → Send to email → Manage recipients',
   '● เปิดใช้งานอยู่ — ปุ่ม ✉ Send to email แสดงอยู่ในเมนู 📄':'● Active — the ✉ Send to email button is shown in the 📄 menu',
   '○ ปิดอยู่ — กดสวิตช์เพื่อเปิดใช้งาน':'○ Off — flip the switch to activate',
   'เปิดใช้งานปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)':'✉ Send to email button activated (affects everyone)',
@@ -6803,8 +6731,6 @@ const TH_EN = {
   'กำลังส่ง...':'Sending...',
   'ไม่พบไฟล์ PDF — กลับไปกด 📄 เพื่อสร้างใหม่':'PDF not found — tap 📄 again to rebuild it',
   'ไม่พบไฟล์ PDF — กดสร้าง PDF ใหม่อีกครั้ง':'PDF not found — build the PDF again',
-  'สร้างร่างอีเมลแล้ว ✓ เปิดไฟล์ .eml เพื่อเปิด draft ใน Outlook (แนบ PDF ให้แล้ว)':'Draft created ✓ open the .eml file to load the draft in Outlook (PDF already attached)',
-  'สร้างร่างอีเมลแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ':'Draft created ✓ but it has no recipients — add them under ☰ → Send to email → Manage recipients',
   'โหมด ⚡ ต้องมีผู้รับ (To) — เพิ่มที่ ☰ → ⚡ Power Automate → 👥 จัดการผู้รับ':'⚡ mode needs a recipient (To) — add one under ☰ → ⚡ Power Automate → 👥 Manage recipients',
   'Flow ถูกระงับอีกครั้ง (license?) — ให้ Power User ปิด ⚡ แล้วใช้แบบลิงก์แทน':'The flow is Suspended again (licence?) — have a Power User turn ⚡ off and use the link mode instead',
   'ส่งอีเมลแล้ว ✓ (แนบ PDF อัตโนมัติ)':'Email sent ✓ (PDF attached automatically)',
@@ -6826,6 +6752,8 @@ const TH_EN_RULES = [
   [/^ซิงค์ล่าสุด: (.*)$/, 'Last synced: $1'],
   [/^อัปเดตล่าสุด (.+) · เครื่อง (\d+) \/ อะไหล่ (\d+)$/, 'Updated $1 · Machines $2 / Parts $3'],
   [/^ซิงค์ไม่สำเร็จ: (.*)$/, 'Sync failed: $1'],
+  [/^เปิด Outlook เว็บแล้ว — แต่อัพโหลดไฟล์ไม่สำเร็จ \((.+)\) · กด ⬇ Save PDF แล้วแนบเอง$/,
+     'Outlook web opened — but the upload failed ($1) · tap ⬇ Save PDF and attach it yourself'],
   /* MUST stay above the bare 'แชร์ไม่สำเร็จ' rule below: that one's (.*) would
      swallow this suffix and leave the Thai tail untranslated. */
   [/^แชร์ไม่สำเร็จ: (.+) — หรือกด ⬇ Save PDF แล้วแนบเอง$/,
@@ -7387,7 +7315,7 @@ function openSendEmailSettingsModal(){
       <div class="se-status sp-status off">กำลังตรวจสอบ...</div>
       <button type="button" class="sp-row se-activate">
         <span class="tm-ic">✉</span>
-        <span class="sp-txt"><b>เปิดใช้งานปุ่ม Send to email</b><span>แสดงปุ่ม ✉ ในเมนู 📄 (เปิด draft ใน Outlook พร้อมแนบ PDF อัตโนมัติ)</span></span>
+        <span class="sp-txt"><b>เปิดใช้งานปุ่ม Send to email</b><span>แสดงปุ่ม ✉ ในเมนู 📄 (เปิด draft ใน Outlook เว็บให้อัตโนมัติ — ดูขั้นตอน 🌐 ด้านล่างสำหรับการแนบ PDF จริง)</span></span>
         <span class="tm-sw se-sw"></span>
       </button>
       <div class="tm-sep" style="margin:2px 0;"></div>
@@ -7450,7 +7378,7 @@ function openGraphSettingsModal(onDone){
     <div class="epm-head"><span>🌐 Outlook เว็บ (Microsoft 365)</span><button type="button" class="epm-x">✕</button></div>
     <div class="epm-body">
       <div class="gr-status sp-status off">กำลังตรวจสอบ...</div>
-      <div class="epm-note">ตั้งค่าครั้งเดียวสำหรับทั้งทีม แล้วแต่ละคนลงชื่อเข้าใช้ด้วยบัญชีตัวเอง — draft จะถูกสร้างในกล่องจดหมายของคนที่กดเอง ถ้าเว้นว่างไว้ ปุ่ม ✉ จะดาวน์โหลดเป็นไฟล์ .eml แทน</div>
+      <div class="epm-note">ตั้งค่าครั้งเดียวสำหรับทั้งทีม แล้วแต่ละคนลงชื่อเข้าใช้ด้วยบัญชีตัวเอง — draft จะถูกสร้างในกล่องจดหมายของคนที่กดเอง ถ้าเว้นว่างไว้ ปุ่ม ✉ จะเปิด Outlook เว็บแบบไม่มีไฟล์แนบจริงแทน (แนบเป็นลิงก์แทน)</div>
       <label>Application (client) ID<input type="text" class="gr-client" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" spellcheck="false"></label>
       <label>Directory (tenant) ID<input type="text" class="gr-tenant" placeholder="common" autocomplete="off" spellcheck="false"></label>
       <label>Redirect URI (คัดลอกไปใส่ใน Azure)<input type="text" class="gr-redirect" readonly onclick="this.select()"></label>
@@ -7480,7 +7408,7 @@ function openGraphSettingsModal(onDone){
 
   const render = ()=>{
     const who = graphSignedInAs();
-    if(!graphConfigured()) setStatus('off', '○ ยังไม่ได้ตั้งค่า — ปุ่ม ✉ จะดาวน์โหลดไฟล์ .eml แทน');
+    if(!graphConfigured()) setStatus('off', '○ ยังไม่ได้ตั้งค่า — ปุ่ม ✉ จะเปิด Outlook เว็บแบบไม่มีไฟล์แนบจริงแทน');
     else if(who) setStatus('on', '● ลงชื่อเข้าใช้เป็น ' + who + ' — ปุ่ม ✉ จะเปิด draft ใน Outlook เว็บ');
     else setStatus('off', '○ ตั้งค่าแล้ว แต่ยังไม่ได้ลงชื่อเข้าใช้ — กดปุ่มด้านล่าง (ทำครั้งเดียว)');
     ov.querySelector('.gr-signout').style.display = who ? '' : 'none';
