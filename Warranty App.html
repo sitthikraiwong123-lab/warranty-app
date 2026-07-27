@@ -6575,8 +6575,10 @@ const TH_EN = {
   /* ---- 👥 Send to email recipients — a SEPARATE list from Auto email's ---- */
   'จัดการผู้รับ (Send to email)':'Manage recipients (Send to email)',
   '👥 จัดการผู้รับ (Send to email)':'👥 Manage recipients (Send to email)',
-  'รายชื่อ To/CC ที่ใส่ให้อัตโนมัติในไฟล์ draft — แยกจากรายชื่อของ ⚡ Auto email':'The To/CC list written into the draft file automatically — separate from ⚡ Auto email’s own list',
-  'รายชื่อนี้ใส่ To/CC ให้อัตโนมัติในไฟล์ draft ตอนกด ✉ Send to email — แยกจากรายชื่อของ ⚡ Auto email · To คือผู้รับหลัก, CC คือสำเนาถึง (แก้ไขได้เฉพาะ Power User)':'This list fills To/CC into the draft file when you tap ✉ Send to email — separate from ⚡ Auto email’s own list · To is the main recipient, CC is copied in (Power User only)',
+  'รายชื่อ To/CC ที่ใส่ให้อัตโนมัติเวลากด ✉ — แยกจากรายชื่อของ ⚡ Auto email':'The To/CC list filled in automatically when you tap ✉ — separate from ⚡ Auto email’s own list',
+  'รายชื่อนี้ใส่ To/CC ให้อัตโนมัติเวลากด ✉ Send to email — แยกจากรายชื่อของ ⚡ Auto email · To คือผู้รับหลัก, CC คือสำเนาถึง (แก้ไขได้เฉพาะ Power User)':'This list fills To/CC in automatically when you tap ✉ Send to email — separate from ⚡ Auto email’s own list · To is the main recipient, CC is copied in (Power User only)',
+  'เข้าสู่ระบบ Outlook เว็บ':'Sign in to Outlook on the web',
+  'ล็อกอินไว้ก่อนใช้ปุ่ม ✉ — ไม่งั้น Outlook อาจเปิดแต่ To/CC/หัวข้อ/เนื้อหาหายหมด (ทำครั้งเดียวต่อเบราว์เซอร์)':'Sign in first before using ✉ — otherwise Outlook may open with To/CC/subject/body all missing (once per browser)',
 
   /* ---- 👥 email recipients ---- */
   '👥 จัดการอีเมลผู้รับ':'👥 Manage email recipients',
@@ -7322,6 +7324,12 @@ function openSendEmailSettingsModal(){
         <span class="tm-sw se-sw"></span>
       </button>
       <div class="tm-sep" style="margin:2px 0;"></div>
+      <button type="button" class="sp-row se-signin" style="display:none;">
+        <span class="tm-ic">🔑</span>
+        <span class="sp-txt"><b>เข้าสู่ระบบ Outlook เว็บ</b><span>ล็อกอินไว้ก่อนใช้ปุ่ม ✉ — ไม่งั้น Outlook อาจเปิดแต่ To/CC/หัวข้อ/เนื้อหาหายหมด (ทำครั้งเดียวต่อเบราว์เซอร์)</span></span>
+        <span class="tm-chev">↗</span>
+      </button>
+      <div class="tm-sep se-signin-sep" style="margin:2px 0;display:none;"></div>
       <button type="button" class="sp-row se-graph">
         <span class="tm-ic">🌐</span>
         <span class="sp-txt"><b>Outlook เว็บ (Microsoft 365)</b><span>ลงชื่อเข้าใช้ครั้งเดียว แล้วเปิด draft ใน Outlook เว็บอัตโนมัติทุกครั้ง</span></span>
@@ -7331,7 +7339,7 @@ function openSendEmailSettingsModal(){
       <div class="tm-sep" style="margin:2px 0;"></div>
       <button type="button" class="sp-row se-recipients">
         <span class="tm-ic">👥</span>
-        <span class="sp-txt"><b>จัดการผู้รับ (Send to email)</b><span>รายชื่อ To/CC ที่ใส่ให้อัตโนมัติในไฟล์ draft — แยกจากรายชื่อของ ⚡ Auto email</span></span>
+        <span class="sp-txt"><b>จัดการผู้รับ (Send to email)</b><span>รายชื่อ To/CC ที่ใส่ให้อัตโนมัติเวลากด ✉ — แยกจากรายชื่อของ ⚡ Auto email</span></span>
         <span class="tm-chev">›</span>
       </button>
     </div>
@@ -7352,8 +7360,12 @@ function openSendEmailSettingsModal(){
       on ? '● เปิดใช้งานอยู่ — ปุ่ม ✉ Send to email แสดงอยู่ในเมนู 📄' : '○ ปิดอยู่ — กดสวิตช์เพื่อเปิดใช้งาน');
     // Which of the two delivery routes is live right now, in one word.
     const who = graphSignedInAs();
-    ov.querySelector('.se-graph-val').textContent =
-      !graphConfigured() ? 'ยังไม่ตั้งค่า' : (who || 'ยังไม่ได้ลงชื่อ');
+    const configured = graphConfigured();
+    ov.querySelector('.se-graph-val').textContent = !configured ? 'ยังไม่ตั้งค่า' : (who || 'ยังไม่ได้ลงชื่อ');
+    // The sign-in nudge only matters on the deeplink route — once Graph is
+    // configured, ✉ never touches the deeplink, so this row is dead weight.
+    ov.querySelector('.se-signin').style.display = configured ? 'none' : '';
+    ov.querySelector('.se-signin-sep').style.display = configured ? 'none' : '';
   };
   render();
 
@@ -7364,6 +7376,12 @@ function openSendEmailSettingsModal(){
     flashStatus(nextHidden ? 'ปิดใช้งานปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)' : 'เปิดใช้งานปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)', 5000);
   };
 
+  // Plain browser sign-in, nothing to do with Graph/MSAL — opens the ordinary
+  // Outlook web inbox so THIS person's browser holds a warm session before
+  // they use ✉, which is what keeps the deeplink from losing its params.
+  ov.querySelector('.se-signin').onclick = ()=>{
+    window.open('https://outlook.office.com/mail/', '_blank', 'noopener');
+  };
   ov.querySelector('.se-graph').onclick = ()=>openGraphSettingsModal(render);
   ov.querySelector('.se-recipients').onclick = ()=>openSendEmailRecipientsModal();
 }
@@ -7497,7 +7515,7 @@ function openSendEmailRecipientsModal(){
     ov.innerHTML = `<div class="edit-part-dialog">
       <div class="epm-head"><span>👥 จัดการผู้รับ (Send to email)</span><button type="button" class="epm-x">✕</button></div>
       <div class="epm-body">
-        <div class="epm-note">รายชื่อนี้ใส่ To/CC ให้อัตโนมัติในไฟล์ draft ตอนกด ✉ Send to email — แยกจากรายชื่อของ ⚡ Auto email · To คือผู้รับหลัก, CC คือสำเนาถึง (แก้ไขได้เฉพาะ Power User)</div>
+        <div class="epm-note">รายชื่อนี้ใส่ To/CC ให้อัตโนมัติเวลากด ✉ Send to email — แยกจากรายชื่อของ ⚡ Auto email · To คือผู้รับหลัก, CC คือสำเนาถึง (แก้ไขได้เฉพาะ Power User)</div>
         <label>ชื่อ<input type="text" class="ser-name" placeholder="เช่น Phutthiphong"></label>
         <label>อีเมล *<input type="email" class="ser-email" placeholder="name@company.com" autocomplete="off"></label>
         <label>ประเภทผู้รับ<select class="ser-type"><option value="to">To — ผู้รับหลัก</option><option value="cc">CC — สำเนาถึง</option></select></label>
