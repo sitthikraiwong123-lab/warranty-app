@@ -5872,10 +5872,12 @@ function buildEmlBlob(opts){
    back to the .eml download above, so the button keeps working regardless. */
 const MSAL_CDN = 'https://cdn.jsdelivr.net/npm/@azure/msal-browser@5.17.1/lib/msal-browser.min.js';
 const GRAPH_SCOPES = ['Mail.ReadWrite'];
-/* Graph rejects a createMessage request larger than 4 MB and base64 inflates
-   the PDF by 4/3, so cap the raw blob under 3 MB and let anything bigger take
-   the .eml route rather than fail at the last step. */
-const GRAPH_MAX_PDF_BYTES = 3 * 1024 * 1024;
+/* Graph's own split: an attachment under 3 MB rides inside the createMessage
+   call, 3 MB–150 MB needs an upload session uploaded in ranges of at most
+   4 MB. Between them they cover every PDF this app can produce, so size is
+   never a reason to fall back to another delivery route. */
+const GRAPH_INLINE_MAX_BYTES = 3 * 1024 * 1024;
+const GRAPH_UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
 
 /* Loaded on demand, never at startup: the app shell is deliberately
    self-contained (jsPDF, html2canvas and the font are all inlined) so it runs
@@ -5948,30 +5950,71 @@ async function graphToken(interactive){
   return r.accessToken;
 }
 
+/* Graph reports failures as {error:{message}} — surface that rather than a
+   bare status, since its messages name the actual problem (consent, quota,
+   mailbox not provisioned) and a "HTTP 403" alone never does. */
+async function graphErrorText(res){
+  let msg = 'HTTP ' + res.status;
+  try{ const j = await res.json(); if(j && j.error && j.error.message) msg = j.error.message; }catch(e){}
+  return msg;
+}
+async function graphJson(token, method, url, body){
+  const res = await fetch(url, {
+    method,
+    headers:{ 'Authorization':'Bearer ' + token, 'Content-Type':'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if(!res.ok) throw new Error(await graphErrorText(res));
+  return res.status === 204 ? null : res.json();
+}
+
+/* 3 MB–150 MB attachments cannot ride inside createMessage; Graph wants an
+   upload session written in sequential ranges. The uploadUrl carries its OWN
+   auth token, so the chunk PUTs must NOT repeat the Authorization header —
+   sending it there is a common way to get an opaque failure. */
+async function uploadLargeAttachment(token, messageId, fileName, blob){
+  const size = blob.size;
+  const session = await graphJson(token, 'POST',
+    'https://graph.microsoft.com/v1.0/me/messages/' + encodeURIComponent(messageId) + '/attachments/createUploadSession',
+    { AttachmentItem: { attachmentType:'file', name: fileName, size } });
+  const url = session && session.uploadUrl;
+  if(!url) throw new Error('Graph ไม่ได้ส่ง uploadUrl กลับมา');
+  for(let start = 0; start < size; start += GRAPH_UPLOAD_CHUNK_BYTES){
+    const end = Math.min(start + GRAPH_UPLOAD_CHUNK_BYTES, size);
+    const res = await fetch(url, {
+      method:'PUT',
+      headers:{ 'Content-Range': 'bytes ' + start + '-' + (end - 1) + '/' + size },
+      body: blob.slice(start, end)
+    });
+    if(!res.ok) throw new Error(await graphErrorText(res));
+  }
+}
+
 /* Creates the draft and returns Graph's Message, whose webLink opens it in
-   Outlook on the web. contentBytes is plain base64 inside JSON we author
-   ourselves — unlike Power Automate's `format: byte` field, nothing re-encodes
-   it, so the same base64 that works here would be double-encoded there. */
+   Outlook on the web. For the inline case contentBytes is plain base64 inside
+   JSON we author ourselves — unlike Power Automate's `format: byte` field,
+   nothing re-encodes it, so the same base64 that works here would be
+   double-encoded there. Oversized files attach in a second step, which is why
+   the draft is created first and the attachment added to it afterwards. */
 async function createGraphDraft(token, d){
   const rcpt = list => list.filter(Boolean).map(a => ({ emailAddress:{ address:a } }));
-  const res = await fetch('https://graph.microsoft.com/v1.0/me/messages', {
-    method:'POST',
-    headers:{ 'Authorization':'Bearer ' + token, 'Content-Type':'application/json' },
-    body: JSON.stringify({
-      subject: d.subject,
-      body: { contentType:'Text', content: d.body },
-      toRecipients: rcpt(d.to),
-      ccRecipients: rcpt(d.cc),
-      attachments: [{ '@odata.type':'#microsoft.graph.fileAttachment',
-        name: d.fileName, contentType:'application/pdf', contentBytes: d.pdfBase64 }]
-    })
-  });
-  if(!res.ok){
-    let msg = 'HTTP ' + res.status;
-    try{ const j = await res.json(); if(j && j.error && j.error.message) msg = j.error.message; }catch(e){}
-    throw new Error(msg);
+  const inline = d.pdfBlob.size < GRAPH_INLINE_MAX_BYTES;
+  const payload = {
+    subject: d.subject,
+    body: { contentType:'Text', content: d.body },
+    toRecipients: rcpt(d.to),
+    ccRecipients: rcpt(d.cc)
+  };
+  if(inline){
+    payload.attachments = [{ '@odata.type':'#microsoft.graph.fileAttachment',
+      name: d.fileName, contentType:'application/pdf', contentBytes: await blobToBase64(d.pdfBlob) }];
   }
-  return res.json();
+  const msg = await graphJson(token, 'POST', 'https://graph.microsoft.com/v1.0/me/messages', payload);
+  if(!inline){
+    if(!msg || !msg.id) throw new Error('Graph ไม่ได้ส่ง id ของ draft กลับมา');
+    await uploadLargeAttachment(token, msg.id, d.fileName, d.pdfBlob);
+  }
+  return msg;
 }
 
 /* ---------- optional direct send via Power Automate ----------
@@ -6034,25 +6077,57 @@ function downloadEmlDraft(d){
   setTimeout(()=> URL.revokeObjectURL(url), 60000);   // let the download start first
 }
 
+/* Pre-Graph fallback for PHONES. A .eml is a desktop-Outlook format — phones
+   just download a file they cannot open — so hand the PDF to the OS share
+   sheet instead, which is the one route that reliably lands a real attachment
+   in Outlook mobile. To/CC cannot ride along (a share sheet carries no
+   recipients), so the subject+body go to the clipboard to paste.
+
+   navigator.share MUST be the first gesture-consuming call: awaiting anything
+   beforehand — a fetch, a FileReader — eats the tap's activation on mobile and
+   the sheet then silently never opens. That is why this loads no recipients
+   and computes no base64 before calling it. */
+async function sendEmailViaShareSheet(){
+  const res = await shareFileViaSheet(pdfSubject());
+  if(res.ok){
+    commitPdfAction();
+    const copied = await copyMessageQuiet();
+    flashStatus(copied
+      ? 'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — คัดลอกหัวข้อ+เนื้อหาไว้ให้แล้ว วางในอีเมลได้เลย'
+      : 'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — หัวข้อ+เนื้อหาคัดลอกได้จากปุ่ม คัดลอก ในหน้าพรีวิว', 9000);
+    return;
+  }
+  // Nothing left the app → no ledger write and no run-number burn.
+  if(res.stage === 'cancelled') return;
+  if(res.stage === 'busy'){ flashStatus('การแชร์ครั้งก่อนยังค้างอยู่ — รอสักครู่แล้วลองใหม่', 5000); return; }
+  flashStatus(res.stage === 'no-api' || res.stage === 'no-file-share'
+    ? 'มือถือนี้แชร์ไฟล์ไม่ได้ — ให้ Power User ตั้งค่า 🌐 Outlook เว็บ เพื่อเปิด draft อัตโนมัติ'
+    : 'แชร์ไม่สำเร็จ: ' + (res.err && res.err.name || 'error') + ' — หรือกด ⬇ Save PDF แล้วแนบเอง', 9000);
+}
+
 /* ✉ Send to email — opens a real Outlook draft with To/CC/subject/body and the
    PDF already attached. NO in-app review step by design: nothing is sent until
    the user presses Send in Outlook, so reviewing twice was pure friction.
    Independent of Power Automate.
 
-   Two routes, chosen by configuration — see the Graph section above for why
-   neither alone is enough:
-     Graph  — Client ID set and the PDF fits: creates the draft in the signed-in
-              user's OWN mailbox and opens it in Outlook on the WEB. Sign in
-              once; every send after that is silent.
-     .eml   — otherwise: downloads a draft file that opens in desktop Outlook. */
+   Three routes. Graph is the only one that delivers everything at once, and it
+   handles ANY file size, so the other two exist purely for the window before
+   an Azure app registration is configured:
+     Graph — Client ID set: creates the draft in the signed-in user's OWN
+             mailbox and opens it in Outlook on the WEB, on phone and desktop
+             alike. Sign in once; every send after that is silent.
+     share — no Client ID, on a phone: OS share sheet (see above).
+     .eml  — no Client ID, on desktop: a draft file Outlook opens fully filled. */
 async function sendEmailCurrentPdf(){
   if(!_pdfPreviewUrl) return;
   if(!_pdfBlob){ flashStatus('ไม่พบไฟล์ PDF — กดสร้าง PDF ใหม่อีกครั้ง', 5000); return; }
 
-  const tooBig = _pdfBlob.size > GRAPH_MAX_PDF_BYTES;
-  const useGraph = graphConfigured() && !tooBig;
-  // Reserve the tab INSIDE the click gesture: the Graph round-trip that follows
-  // would otherwise burn the activation and the draft would be popup-blocked.
+  const useGraph = graphConfigured();
+  // Both branches below claim something that REQUIRES the tap's own activation
+  // — the share sheet, or the reserved tab — so the route has to be decided
+  // synchronously here, before the first await.
+  if(!useGraph && isMobileDevice()) return sendEmailViaShareSheet();
+
   const win = useGraph ? window.open('about:blank', '_blank') : null;
   const closeWin = ()=>{ try{ if(win && !win.closed) win.close(); }catch(e){} };
 
@@ -6066,8 +6141,10 @@ async function sendEmailCurrentPdf(){
     // safe() deliberately keeps Thai in the PDF filename, and a raw non-ASCII
     // name in a MIME header would need RFC 2231 continuations to be legal.
     const fileName = (currentPdfFile(true) || {}).name || 'export_order.pdf';
+    // Graph takes the Blob (it may need to slice it into ranges); the .eml
+    // builder takes base64, so that conversion happens only on that branch.
     const d = { to, cc, subject: pdfSubject(), body: _emailDraftText || '',
-                fileName, pdfBase64: await blobToBase64(_pdfBlob) };
+                fileName, pdfBlob: _pdfBlob };
 
     if(useGraph){
       let token;
@@ -6090,13 +6167,11 @@ async function sendEmailCurrentPdf(){
       return;
     }
 
-    downloadEmlDraft(d);
+    downloadEmlDraft(Object.assign({}, d, { pdfBase64: await blobToBase64(_pdfBlob) }));
     commitPdfAction();
-    flashStatus(tooBig
-      ? 'ไฟล์ใหญ่เกินกว่าจะสร้าง draft บนเว็บ — ดาวน์โหลดเป็นไฟล์ .eml แทน (แนบ PDF ให้แล้ว)'
-      : to.length
-        ? 'สร้างร่างอีเมลแล้ว ✓ เปิดไฟล์ .eml เพื่อเปิด draft ใน Outlook (แนบ PDF ให้แล้ว)'
-        : 'สร้างร่างอีเมลแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ', 8000);
+    flashStatus(to.length
+      ? 'สร้างร่างอีเมลแล้ว ✓ เปิดไฟล์ .eml เพื่อเปิด draft ใน Outlook (แนบ PDF ให้แล้ว)'
+      : 'สร้างร่างอีเมลแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ', 8000);
   }catch(err){
     closeWin();
     flashStatus('สร้างร่างอีเมลไม่สำเร็จ: ' + (err && err.message ? err.message : err), 8000);
@@ -6549,7 +6624,11 @@ const TH_EN = {
   'ยังไม่ได้ลงชื่อเข้าใช้ Outlook — ไปที่ ☰ → Send to email → 🌐 Outlook เว็บ แล้วกดลงชื่อเข้าใช้ (ทำครั้งเดียว)':'Not signed in to Outlook — go to ☰ → Send to email → 🌐 Outlook on the web and sign in (one time only)',
   'เปิด draft ใน Outlook เว็บแล้ว ✓ (แนบ PDF + ใส่ผู้รับให้แล้ว) — ตรวจแล้วกดส่ง':'Draft opened in Outlook on the web ✓ (PDF attached, recipients filled in) — check it and press Send',
   'เปิด draft ใน Outlook เว็บแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ':'Draft opened in Outlook on the web ✓ but it has no recipients — add them under ☰ → Send to email → Manage recipients',
-  'ไฟล์ใหญ่เกินกว่าจะสร้าง draft บนเว็บ — ดาวน์โหลดเป็นไฟล์ .eml แทน (แนบ PDF ให้แล้ว)':'Too large to create a draft on the web — downloaded as an .eml file instead (PDF attached)',
+  'Graph ไม่ได้ส่ง uploadUrl กลับมา':'Graph did not return an uploadUrl',
+  'Graph ไม่ได้ส่ง id ของ draft กลับมา':'Graph did not return a draft id',
+  'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — คัดลอกหัวข้อ+เนื้อหาไว้ให้แล้ว วางในอีเมลได้เลย':'Shared to Outlook ✓ (PDF attached) — the subject and body are on the clipboard, just paste them in',
+  'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — หัวข้อ+เนื้อหาคัดลอกได้จากปุ่ม คัดลอก ในหน้าพรีวิว':'Shared to Outlook ✓ (PDF attached) — copy the subject and body with the Copy button on the preview screen',
+  'มือถือนี้แชร์ไฟล์ไม่ได้ — ให้ Power User ตั้งค่า 🌐 Outlook เว็บ เพื่อเปิด draft อัตโนมัติ':'This phone cannot share files — ask a Power User to set up 🌐 Outlook on the web so drafts open automatically',
   '● เปิดใช้งานอยู่ — ปุ่ม ✉ Send to email แสดงอยู่ในเมนู 📄':'● Active — the ✉ Send to email button is shown in the 📄 menu',
   '○ ปิดอยู่ — กดสวิตช์เพื่อเปิดใช้งาน':'○ Off — flip the switch to activate',
   'เปิดใช้งานปุ่ม ✉ Send to email แล้ว (มีผลกับทุกคน)':'✉ Send to email button activated (affects everyone)',
@@ -6747,6 +6826,10 @@ const TH_EN_RULES = [
   [/^ซิงค์ล่าสุด: (.*)$/, 'Last synced: $1'],
   [/^อัปเดตล่าสุด (.+) · เครื่อง (\d+) \/ อะไหล่ (\d+)$/, 'Updated $1 · Machines $2 / Parts $3'],
   [/^ซิงค์ไม่สำเร็จ: (.*)$/, 'Sync failed: $1'],
+  /* MUST stay above the bare 'แชร์ไม่สำเร็จ' rule below: that one's (.*) would
+     swallow this suffix and leave the Thai tail untranslated. */
+  [/^แชร์ไม่สำเร็จ: (.+) — หรือกด ⬇ Save PDF แล้วแนบเอง$/,
+     'Share failed: $1 — or tap ⬇ Save PDF and attach it yourself'],
   [/^แชร์ไม่สำเร็จ: (.*)$/, 'Share failed: $1'],
   [/^บันทึกไม่สำเร็จ: (.*)$/, 'Save failed: $1'],
   [/^อัปโหลดรูปไม่สำเร็จ: (.*)$/, 'Image upload failed: $1'],
@@ -6771,9 +6854,16 @@ const TH_EN_RULES = [
      (m,p1,p2)=>'Delete failed: ' + p1 + (p2 ? ' (deleting requires an internet connection)' : '')],
   [/^กู้คืนไม่สำเร็จ: (.*)$/, 'Restore failed: $1'],
   [/^เพิ่มไม่สำเร็จ: (.*)$/, 'Add failed: $1'],
-  [/^ส่งไม่สำเร็จ: (.*)$/, 'Send failed: $1'],
-  [/^สร้างร่างอีเมลไม่สำเร็จ: (.*)$/, 'Could not build the email draft: $1'],
-  [/^ลงชื่อเข้าใช้ไม่สำเร็จ: (.*)$/, 'Sign-in failed: $1'],
+  /* These three wrap an error message that is itself often one of OUR OWN Thai
+     strings (a thrown Error, not text from a server), so a plain '$1' would
+     leave the interesting half untranslated. Recurse through translateTh and
+     fall back to the raw text, which is what a genuine Graph/network message
+     is — already English, and left alone because it contains no Thai. */
+  [/^ส่งไม่สำเร็จ: (.*?)( — หรือกด ⬇ Save PDF แล้วแนบเอง)?$/,
+     (m,p1,p2)=>'Send failed: ' + (translateTh(p1) || p1)
+                + (p2 ? ' — or tap ⬇ Save PDF and attach it yourself' : '')],
+  [/^สร้างร่างอีเมลไม่สำเร็จ: (.*)$/, (m,p1)=>'Could not build the email draft: ' + (translateTh(p1) || p1)],
+  [/^ลงชื่อเข้าใช้ไม่สำเร็จ: (.*)$/, (m,p1)=>'Sign-in failed: ' + (translateTh(p1) || p1)],
   [/^● ลงชื่อเข้าใช้เป็น (.+) — ปุ่ม ✉ จะเปิด draft ใน Outlook เว็บ$/,
      '● Signed in as $1 — ✉ opens a draft in Outlook on the web'],
   [/^แชร์ถูกปฏิเสธ: (.*)$/, 'Share refused: $1'],
