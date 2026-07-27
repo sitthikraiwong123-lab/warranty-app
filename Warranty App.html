@@ -5798,9 +5798,12 @@ function blobToBase64(blob){
 }
 
 /* This text ends up inside the OUTGOING EMAIL, never a DOM text node, so
-   applyI18n can't reach it — translate at the call site via t(). Recipients
-   are SEMICOLON separated, matching how Outlook displays them and how the
-   ⚡ Auto email payload already joins them. */
+   applyI18n can't reach it — translate at the call site via t().
+
+   ⚠️ Recipients here are COMMA separated. The ⚡ Auto email payload joins the
+   same rows with ';' because that is what the Power Automate connector wants,
+   but the compose deeplink follows the mailto/RFC 6068 convention and silently
+   ignores a semicolon-joined list — don't "unify" the two joiners. */
 function webComposeUrl(subject, body, uploadedUrl, to, cc){
   const enc = encodeURIComponent;
   const fullBody = body + (uploadedUrl
@@ -6089,7 +6092,7 @@ async function sendEmailCurrentPdf(){
       uploadErr = (upErr && upErr.message) ? upErr.message : String(upErr);
     }
 
-    const url = webComposeUrl(subject, body, uploadedUrl, to.join(';'), cc.join(';'));
+    const url = webComposeUrl(subject, body, uploadedUrl, to.join(','), cc.join(','));
     if(!openReserved(url)) throw new Error('เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปสำหรับเว็บนี้แล้วลองใหม่ หรือกด ⬇ Save PDF แล้วแนบเอง');
     commitPdfAction();
     flashStatus(uploadedUrl
