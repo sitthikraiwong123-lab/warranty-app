@@ -663,10 +663,14 @@ html[lang="en"] .photo-canvas:empty::after{content:'Tap to add photo';} /* CSS-g
 .pdf-modal-body{flex:1;background:#525659;overflow:auto;}
 #pdfModalImg{width:100%;display:block;}
 .email-draft-section{background:#fff;padding:12px 14px 16px;border-top:6px solid #525659;}
-.email-draft-label{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;
+.email-draft-label{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;
   font-size:13px;font-weight:700;color:var(--dark);}
+.email-draft-label .edl-btns{display:flex;gap:6px;flex-shrink:0;}
 .email-draft-label button{background:var(--red);color:#fff;border:none;border-radius:6px;
   padding:5px 12px;font-size:12px;font-weight:600;}
+/* Body-only copy is the secondary of the pair: the FULL draft is what the ✉
+   mobile route needs pasted, so that one keeps the filled style. */
+.email-draft-label button.edl-alt{background:transparent;color:var(--red);border:1px solid var(--red);}
 #emailDraftText{width:100%;min-height:160px;box-sizing:border-box;border:1px solid var(--border);
   border-radius:8px;padding:10px;font-size:13px;line-height:1.5;font-family:inherit;resize:vertical;color:#222;}
 /* The actions live under the preview: decide what to do AFTER seeing the PDF.
@@ -816,7 +820,10 @@ table.pphoto tr td:last-child{ border-right:none !important; }
       <div class="email-draft-section">
         <div class="email-draft-label">
           <span>ร่างอีเมล</span>
-          <button id="emailCopyBtn">คัดลอก</button>
+          <span class="edl-btns">
+            <button id="emailCopyBtn" class="edl-alt" title="คัดลอกเฉพาะเนื้อหา — เหมาะกับวางในแชท">คัดลอกเนื้อหา</button>
+            <button id="emailCopyAllBtn" title="คัดลอก ถึง/สำเนา/หัวข้อ/เนื้อหา ทั้งหมด — เหมาะกับวางในอีเมล">คัดลอกทั้งฉบับ</button>
+          </span>
         </div>
         <textarea id="emailDraftText" readonly></textarea>
       </div>
@@ -5656,6 +5663,10 @@ function openPdfPreview(){
   document.getElementById('emailDraftText').value = _emailDraftText || '';
   document.getElementById('pdfModal').classList.add('open');
   modalOpened();
+  // Warm the recipients cache now so buildFullDraftText() can stay synchronous
+  // when a copy button is pressed — see the comment there. Fire-and-forget:
+  // a failure just means the copied draft has no To/CC lines.
+  loadSendEmailRecipients().catch(()=>{});
 }
 function closePdfPreview(){
   document.getElementById('pdfModal').classList.remove('open');
@@ -5767,9 +5778,36 @@ async function shareFileViaSheet(title){
 
 /* Puts the email/chat message on the clipboard AFTER a share (activation is
    often gone by then, especially on Android — quiet failure; the preview's
-   "คัดลอก" button is the manual path). */
+   copy buttons are the manual path). Body ONLY: this one serves 📤 Share,
+   which targets chat apps where To/Subject headers would just be noise. */
 async function copyMessageQuiet(){
   try{ await navigator.clipboard.writeText(_emailDraftText || ''); return true; }catch(e){ return false; }
+}
+
+/* The FULL draft as pasteable text — the header block that a share sheet
+   cannot carry, followed by the body. This is what the ✉ mobile route needs:
+   the share sheet attaches the PDF but drops To/CC/Subject entirely, so
+   without this they would have to be retyped by hand.
+
+   Deliberately synchronous, reading whatever the recipients cache already
+   holds: a clipboard write placed behind an await loses the tap's transient
+   activation and silently fails on Android (same trap as navigator.share).
+   openPdfPreview() warms the cache instead, so it is populated by the time
+   any copy button can be pressed. Labels go through t() because this text
+   leaves the app in an email, where applyI18n can never reach it. */
+function buildFullDraftText(){
+  const rows = _sendEmailRecipientsCache || [];
+  const pick = cc => rows.filter(r => cc ? r.Type === 'cc' : r.Type !== 'cc')
+                         .map(r => r.Email).filter(Boolean).join(', ');
+  const to = pick(false), cc = pick(true);
+  const head = [];
+  if(to) head.push(t('ถึง:') + ' ' + to);
+  if(cc) head.push(t('สำเนา:') + ' ' + cc);
+  head.push(t('หัวข้อ:') + ' ' + pdfSubject());
+  return head.join('\n') + '\n\n' + (_emailDraftText || '');
+}
+async function copyFullDraftQuiet(){
+  try{ await navigator.clipboard.writeText(buildFullDraftText()); return true; }catch(e){ return false; }
 }
 
 /* ---------- ✉ Send to email — Outlook WEB compose deeplink ----------
@@ -6047,10 +6085,12 @@ async function sendEmailViaShareSheet(){
   const res = await shareFileViaSheet(pdfSubject());
   if(res.ok){
     commitPdfAction();
-    const copied = await copyMessageQuiet();
+    // FULL draft, not just the body: the share sheet carried the PDF but
+    // dropped To/CC/Subject, so those are exactly what needs pasting.
+    const copied = await copyFullDraftQuiet();
     flashStatus(copied
-      ? 'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — คัดลอกหัวข้อ+เนื้อหาไว้ให้แล้ว วางในอีเมลได้เลย'
-      : 'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — หัวข้อ+เนื้อหาคัดลอกได้จากปุ่ม คัดลอก ในหน้าพรีวิว', 9000);
+      ? 'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — คัดลอกผู้รับ+หัวข้อ+เนื้อหาไว้ให้แล้ว วางในอีเมลได้เลย'
+      : 'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — กดปุ่ม คัดลอกทั้งฉบับ ในหน้าพรีวิวเพื่อคัดลอกผู้รับ+หัวข้อ+เนื้อหา', 9000);
     return;
   }
   // Nothing left the app → no ledger write and no run-number burn.
@@ -6364,8 +6404,14 @@ const TH_EN = {
   'บันทึกชื่อเรียกใหม่แล้ว ✓':'New name saved ✓',
   // PDF preview modal
   'ร่างอีเมล':'Email draft',
-  'คัดลอก':'Copy',
+  'คัดลอกเนื้อหา':'Copy body',
+  'คัดลอกทั้งฉบับ':'Copy all',
+  'คัดลอกเฉพาะเนื้อหา — เหมาะกับวางในแชท':'Copies the body only — best for pasting into a chat',
+  'คัดลอก ถึง/สำเนา/หัวข้อ/เนื้อหา ทั้งหมด — เหมาะกับวางในอีเมล':'Copies To/Cc/Subject/body together — best for pasting into an email',
   'คัดลอกแล้ว ✓':'Copied ✓',
+  'ถึง:':'To:',
+  'สำเนา:':'Cc:',
+  'หัวข้อ:':'Subject:',
   'ส่งไปยังแชท / แอปอื่น':'Send to a chat / another app',
   // companion (suggested-set) prompt
   'ไม่':'No',
@@ -6600,8 +6646,8 @@ const TH_EN = {
   'เปิด draft ใน Outlook เว็บแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ':'Draft opened in Outlook on the web ✓ but it has no recipients — add them under ☰ → Send to email → Manage recipients',
   'Graph ไม่ได้ส่ง uploadUrl กลับมา':'Graph did not return an uploadUrl',
   'Graph ไม่ได้ส่ง id ของ draft กลับมา':'Graph did not return a draft id',
-  'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — คัดลอกหัวข้อ+เนื้อหาไว้ให้แล้ว วางในอีเมลได้เลย':'Shared to Outlook ✓ (PDF attached) — the subject and body are on the clipboard, just paste them in',
-  'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — หัวข้อ+เนื้อหาคัดลอกได้จากปุ่ม คัดลอก ในหน้าพรีวิว':'Shared to Outlook ✓ (PDF attached) — copy the subject and body with the Copy button on the preview screen',
+  'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — คัดลอกผู้รับ+หัวข้อ+เนื้อหาไว้ให้แล้ว วางในอีเมลได้เลย':'Shared to Outlook ✓ (PDF attached) — recipients, subject and body are on the clipboard, just paste them in',
+  'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — กดปุ่ม คัดลอกทั้งฉบับ ในหน้าพรีวิวเพื่อคัดลอกผู้รับ+หัวข้อ+เนื้อหา':'Shared to Outlook ✓ (PDF attached) — tap Copy all on the preview screen to copy the recipients, subject and body',
   'มือถือนี้แชร์ไฟล์ไม่ได้ — ให้ Power User ตั้งค่า 🌐 Outlook เว็บ เพื่อเปิด draft อัตโนมัติ':'This phone cannot share files — ask a Power User to set up 🌐 Outlook on the web so drafts open automatically',
   'เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปสำหรับเว็บนี้แล้วลองใหม่':'The browser blocked the popup — allow popups for this site and try again',
   'เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปสำหรับเว็บนี้แล้วลองใหม่ หรือกด ⬇ Save PDF แล้วแนบเอง':'The browser blocked the popup — allow popups for this site and try again, or tap ⬇ Save PDF and attach it yourself',
@@ -7697,18 +7743,35 @@ document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('pdfModalClose').onclick = ()=>userDismissTopModal();
   const pdfModalEl = document.getElementById('pdfModal');
   pdfModalEl.addEventListener('click', (e)=>{ if(e.target === pdfModalEl) userDismissTopModal(); });
-  document.getElementById('emailCopyBtn').onclick = async ()=>{
-    const ta = document.getElementById('emailDraftText');
-    try{
-      await navigator.clipboard.writeText(ta.value);
-    }catch(err){
-      ta.select(); document.execCommand('copy'); // fallback for browsers without Clipboard API permission
-    }
-    const btn = document.getElementById('emailCopyBtn');
-    const orig = btn.textContent;
-    btn.textContent = 'คัดลอกแล้ว ✓';
-    setTimeout(()=>{ btn.textContent = orig; }, 1500);
+  /* Two clipboard payloads because there are two real destinations: chat wants
+     the body alone, an email compose wants the To/CC/Subject header block too
+     (which is exactly what the ✉ mobile share sheet drops). The text is built
+     synchronously so the write stays inside the tap's activation. */
+  const wireCopyBtn = (id, getText)=>{
+    const btn = document.getElementById(id);
+    btn.onclick = async ()=>{
+      const text = getText();
+      // Captured BEFORE the await: a fast second tap would otherwise read the
+      // "copied" label as the original and leave it stuck there.
+      const orig = btn.dataset.label || (btn.dataset.label = btn.textContent);
+      try{
+        await navigator.clipboard.writeText(text);
+      }catch(err){
+        // Fallback for browsers that refuse the Clipboard API: bounce the text
+        // through a throwaway textarea, since execCommand needs a real selection.
+        const tmp = document.createElement('textarea');
+        tmp.value = text;
+        tmp.style.position = 'fixed'; tmp.style.opacity = '0';
+        document.body.appendChild(tmp); tmp.select();
+        try{ document.execCommand('copy'); }catch(e){}
+        tmp.remove();
+      }
+      btn.textContent = 'คัดลอกแล้ว ✓';
+      setTimeout(()=>{ btn.textContent = orig; }, 1500);
+    };
   };
+  wireCopyBtn('emailCopyBtn', ()=> document.getElementById('emailDraftText').value);
+  wireCopyBtn('emailCopyAllBtn', buildFullDraftText);
   document.getElementById('btnHistory').onclick = ()=>toggleHistory();
   renderHistory();
 });
