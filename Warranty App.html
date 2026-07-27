@@ -5710,6 +5710,11 @@ function pdfSubject(){
    📤 Share — ส่งไฟล์ PDF เข้า "แชท/แอปอื่นใดก็ได้" ผ่าน OS share sheet
        สำเร็จ = จบที่ share sheet; ล้มเหลว = ชี้ไปปุ่ม Save PDF เท่านั้น */
 
+function isMobileDevice(){
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.userAgent)); // iPadOS masquerades as Mac
+}
+
 /* Synchronous on purpose: navigator.share() only works inside the tap's user
    gesture, and awaiting a fetch first eats that gesture on mobile browsers —
    the share sheet then silently never opens. The blob is kept from export.
@@ -6023,20 +6028,62 @@ function autoEmailCurrentPdf(){
   }
   openAutoEmailReviewModal();
 }
+/* Pre-Graph fallback for PHONES, because the compose deeplink is not merely
+   unreliable on mobile — it is categorically broken there. Field-tested by
+   typing the deeplink straight into mobile Chrome's address bar, already
+   signed in, bypassing this app entirely: Outlook still landed on the Inbox
+   and ignored every query param. So mobile gets the OS share sheet, the one
+   route that reliably lands a REAL attachment in Outlook mobile.
+
+   To/CC can't ride along (a share sheet carries no recipients), so the
+   subject+body go to the clipboard to paste. That's a worse fill than
+   desktop gets, and it's the honest ceiling until Graph is configured.
+
+   navigator.share MUST be the first gesture-consuming call: awaiting anything
+   beforehand — a fetch, a FileReader — eats the tap's activation on mobile and
+   the sheet then silently never opens. That is why this loads no recipients
+   and computes no base64 before calling it. */
+async function sendEmailViaShareSheet(){
+  const res = await shareFileViaSheet(pdfSubject());
+  if(res.ok){
+    commitPdfAction();
+    const copied = await copyMessageQuiet();
+    flashStatus(copied
+      ? 'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — คัดลอกหัวข้อ+เนื้อหาไว้ให้แล้ว วางในอีเมลได้เลย'
+      : 'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — หัวข้อ+เนื้อหาคัดลอกได้จากปุ่ม คัดลอก ในหน้าพรีวิว', 9000);
+    return;
+  }
+  // Nothing left the app → no ledger write and no run-number burn.
+  if(res.stage === 'cancelled') return;
+  if(res.stage === 'busy'){ flashStatus('การแชร์ครั้งก่อนยังค้างอยู่ — รอสักครู่แล้วลองใหม่', 5000); return; }
+  flashStatus(res.stage === 'no-api' || res.stage === 'no-file-share'
+    ? 'มือถือนี้แชร์ไฟล์ไม่ได้ — ให้ Power User ตั้งค่า 🌐 Outlook เว็บ เพื่อเปิด draft อัตโนมัติ'
+    : 'แชร์ไม่สำเร็จ: ' + (res.err && res.err.name || 'error') + ' — หรือกด ⬇ Save PDF แล้วแนบเอง', 9000);
+}
+
 /* ✉ Send to email — opens a real Outlook draft with To/CC/subject/body, and
    the PDF attached (Graph) or linked (deeplink — see above for the trade-off).
    NO in-app review step by design: nothing is sent until the user presses
    Send in Outlook, so reviewing twice was pure friction. Independent of
    Power Automate.
 
-   Graph — Client ID configured: real attachment, everything auto-filled
-           reliably, per-user. Preferred whenever available.
-   deeplink — no Client ID: the fallback documented above. */
+   Graph    — Client ID configured: real attachment, everything auto-filled
+              reliably, per-user, on phone and desktop alike. Always preferred.
+   share    — no Client ID, on a phone: OS share sheet (see above — the mobile
+              deeplink is broken outright, so this is not a "nicer" choice but
+              the only working one).
+   deeplink — no Client ID, on desktop: compose URL with everything filled and
+              the PDF as a Drive link. */
 async function sendEmailCurrentPdf(){
   if(!_pdfPreviewUrl) return;
   if(!_pdfBlob){ flashStatus('ไม่พบไฟล์ PDF — กดสร้าง PDF ใหม่อีกครั้ง', 5000); return; }
 
   const useGraph = graphConfigured();
+  // Decided SYNCHRONOUSLY, before the first await and before the tab reserve:
+  // navigator.share needs the tap's own activation untouched, and calling
+  // window.open first would consume it.
+  if(!useGraph && isMobileDevice()) return sendEmailViaShareSheet();
+
   // Reserve the tab INSIDE the click gesture, before any await — both routes
   // below do async work (a Graph call, or a Drive upload) that would burn the
   // tap's activation and get a LATER window.open popup-blocked.
@@ -6553,6 +6600,9 @@ const TH_EN = {
   'เปิด draft ใน Outlook เว็บแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ':'Draft opened in Outlook on the web ✓ but it has no recipients — add them under ☰ → Send to email → Manage recipients',
   'Graph ไม่ได้ส่ง uploadUrl กลับมา':'Graph did not return an uploadUrl',
   'Graph ไม่ได้ส่ง id ของ draft กลับมา':'Graph did not return a draft id',
+  'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — คัดลอกหัวข้อ+เนื้อหาไว้ให้แล้ว วางในอีเมลได้เลย':'Shared to Outlook ✓ (PDF attached) — the subject and body are on the clipboard, just paste them in',
+  'แชร์ไป Outlook แล้ว ✓ (แนบ PDF) — หัวข้อ+เนื้อหาคัดลอกได้จากปุ่ม คัดลอก ในหน้าพรีวิว':'Shared to Outlook ✓ (PDF attached) — copy the subject and body with the Copy button on the preview screen',
+  'มือถือนี้แชร์ไฟล์ไม่ได้ — ให้ Power User ตั้งค่า 🌐 Outlook เว็บ เพื่อเปิด draft อัตโนมัติ':'This phone cannot share files — ask a Power User to set up 🌐 Outlook on the web so drafts open automatically',
   'เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปสำหรับเว็บนี้แล้วลองใหม่':'The browser blocked the popup — allow popups for this site and try again',
   'เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปสำหรับเว็บนี้แล้วลองใหม่ หรือกด ⬇ Save PDF แล้วแนบเอง':'The browser blocked the popup — allow popups for this site and try again, or tap ⬇ Save PDF and attach it yourself',
   '📎 ไฟล์ PDF:':'📎 PDF file:',
@@ -7362,10 +7412,12 @@ function openSendEmailSettingsModal(){
     const who = graphSignedInAs();
     const configured = graphConfigured();
     ov.querySelector('.se-graph-val').textContent = !configured ? 'ยังไม่ตั้งค่า' : (who || 'ยังไม่ได้ลงชื่อ');
-    // The sign-in nudge only matters on the deeplink route — once Graph is
-    // configured, ✉ never touches the deeplink, so this row is dead weight.
-    ov.querySelector('.se-signin').style.display = configured ? 'none' : '';
-    ov.querySelector('.se-signin-sep').style.display = configured ? 'none' : '';
+    // The sign-in nudge only matters on the DESKTOP deeplink route: Graph
+    // never touches the deeplink, and on mobile the deeplink is bypassed
+    // entirely for the share sheet — in both cases the row is dead weight.
+    const nudge = (!configured && !isMobileDevice()) ? '' : 'none';
+    ov.querySelector('.se-signin').style.display = nudge;
+    ov.querySelector('.se-signin-sep').style.display = nudge;
   };
   render();
 
