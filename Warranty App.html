@@ -830,7 +830,7 @@ table.pphoto tr td:last-child{ border-right:none !important; }
     </div>
     <div class="pm-menu" role="menu">
       <button class="pm-menu-item primary pm-full" id="pmAutoEmail" role="menuitem" title="ส่งอีเมลอัตโนมัติทันทีผ่าน Power Automate พร้อมไฟล์แนบ"><span class="pmi-ic">⚡</span><span>Auto email</span></button>
-      <button class="pm-menu-item accent pm-full" id="pmSendEmail" role="menuitem"><span class="pmi-ic">✉</span><span>Send to email</span></button>
+      <button class="pm-menu-item accent pm-full" id="pmSendEmail" role="menuitem"><span class="pmi-ic">✉</span><span class="pmi-tx">Send to email</span></button>
       <button class="pm-menu-item" id="pmSavePdf" role="menuitem"><span class="pmi-ic">⬇</span><span>Save PDF</span></button>
       <button class="pm-menu-item" id="pmShare" role="menuitem" title="ส่งไปยังแชท / แอปอื่น"><span class="pmi-ic">📤</span><span>Share</span></button>
     </div>
@@ -1698,6 +1698,14 @@ function paSendOn(){ return !!appSettings.paSend; }
    than per-device storage. */
 function graphClientId(){ return String(appSettings.graphClientId || '').trim(); }
 function graphConfigured(){ return !!graphClientId(); }
+/* Graph is set up for the team, but THIS browser has no cached account yet.
+   Reads graphSignedInAs(), which needs MSAL to have been initialised — before
+   that it reports "not signed in" even when a cached account exists. That is a
+   safe way to be wrong: the sign-in path tries silent auth first and succeeds
+   without a popup. openPdfPreview() warms MSAL so the label settles correctly
+   before the button can be pressed. */
+let _graphForceLogin = false;   // set when a cached token stops renewing silently
+function graphNeedsLogin(){ return graphConfigured() && (_graphForceLogin || !graphSignedInAs()); }
 // Two independent buttons in the 📄 preview menu, each with its own Power-User
 // visibility switch: ⚡ Auto email (always sends via the Power Automate flow —
 // toggled on the ⚡ Power Automate settings page, next to the flow itself) and
@@ -1763,6 +1771,14 @@ function refreshEmailButtonsLayout(){
   const bothShown = showAuto && showSend;
   auto.classList.toggle('pm-full', showAuto && !bothShown);
   send.classList.toggle('pm-full', showSend && !bothShown);
+  /* First run on this device: Graph is configured but nobody has signed in
+     here yet, so ✉ becomes the sign-in button instead. Doing it on the button
+     itself means the one-time login never requires a trip into Power User.
+     Reuses the settings page's own label so there is no second key to keep. */
+  const needsLogin = graphNeedsLogin();
+  send.querySelector('.pmi-ic').textContent = needsLogin ? '🔑' : '✉';
+  send.querySelector('.pmi-tx').textContent = needsLogin ? 'ลงชื่อเข้าใช้ Outlook' : 'Send to email';
+  send.title = needsLogin ? 'ต้องลงชื่อเข้าใช้ Outlook ครั้งเดียวก่อน แล้วปุ่มนี้จะกลับเป็น Send to email' : '';
 }
 async function loadAppSettings(){
   try{ const cached = await lkvGet('appSettings'); if(cached) appSettings = Object.assign({}, DEFAULT_APP_SETTINGS, cached); }catch(e){}
@@ -5667,6 +5683,10 @@ function openPdfPreview(){
   // when a copy button is pressed — see the comment there. Fire-and-forget:
   // a failure just means the copied draft has no To/CC lines.
   loadSendEmailRecipients().catch(()=>{});
+  // Same idea for MSAL: initialising it here lets graphNeedsLogin() see any
+  // cached account, so ✉ shows the right label rather than briefly offering a
+  // sign-in to someone who is already signed in.
+  if(graphConfigured()) getMsalApp().then(refreshEmailButtonsLayout).catch(()=>{});
 }
 function closePdfPreview(){
   document.getElementById('pdfModal').classList.remove('open');
@@ -6114,6 +6134,21 @@ async function sendEmailViaShareSheet(){
               the only working one).
    deeplink — no Client ID, on desktop: compose URL with everything filled and
               the PDF as a Drive link. */
+/* The one-time sign-in, driven from ✉ itself so nobody has to open Power User
+   to get started. Interactive on purpose — this runs only when there is no
+   cached account, and it still tries silent auth first inside graphToken(),
+   so a stale graphNeedsLogin() reading costs a no-op rather than a popup. */
+async function graphSignInFromSendButton(){
+  try{
+    await graphToken(true);
+    _graphForceLogin = false;        // fresh token — clear any expiry latch
+    refreshEmailButtonsLayout();     // ✉ drops the 🔑 and reads normally again
+    flashStatus('ลงชื่อเข้าใช้แล้ว ✓ กด ✉ อีกครั้งเพื่อเปิด draft — ครั้งต่อไปไม่ต้องลงชื่อแล้ว', 9000);
+  }catch(err){
+    flashStatus('ลงชื่อเข้าใช้ไม่สำเร็จ: ' + (err && err.message ? err.message : err), 8000);
+  }
+}
+
 async function sendEmailCurrentPdf(){
   if(!_pdfPreviewUrl) return;
   if(!_pdfBlob){ flashStatus('ไม่พบไฟล์ PDF — กดสร้าง PDF ใหม่อีกครั้ง', 5000); return; }
@@ -6123,6 +6158,13 @@ async function sendEmailCurrentPdf(){
   // navigator.share needs the tap's own activation untouched, and calling
   // window.open first would consume it.
   if(!useGraph && isMobileDevice()) return sendEmailViaShareSheet();
+
+  // Same reason, one step earlier: MSAL's login popup and the about:blank
+  // reserve below would be TWO popups from a single tap, and browsers block
+  // the second. So the first tap spends its activation on the sign-in alone
+  // and the send happens on the next one — only ever on this device's first
+  // use, since MSAL caches the account in localStorage afterwards.
+  if(useGraph && graphNeedsLogin()) return graphSignInFromSendButton();
 
   // Reserve the tab INSIDE the click gesture, before any await — both routes
   // below do async work (a Graph call, or a Drive upload) that would burn the
@@ -6151,8 +6193,14 @@ async function sendEmailCurrentPdf(){
       try{
         token = await graphToken(false);          // silent only on the send path
       }catch(e){
+        // Reached when an account IS cached but its token can no longer be
+        // renewed silently (expired, revoked, password changed). Force the
+        // button back to its sign-in state so the next tap re-authenticates
+        // instead of failing here again.
         closeWin();
-        flashStatus('ยังไม่ได้ลงชื่อเข้าใช้ Outlook — ไปที่ ☰ → Send to email → 🌐 Outlook เว็บ แล้วกดลงชื่อเข้าใช้ (ทำครั้งเดียว)', 9000);
+        _graphForceLogin = true;
+        refreshEmailButtonsLayout();
+        flashStatus('เซสชัน Outlook หมดอายุ — กดปุ่มอีกครั้งเพื่อลงชื่อเข้าใช้ใหม่', 9000);
         return;
       }
       const draft = await createGraphDraft(token, { to, cc, subject, body, fileName, pdfBlob:_pdfBlob });
@@ -6641,7 +6689,9 @@ const TH_EN = {
   'โหลดไลบรารีเข้าสู่ระบบไม่สำเร็จ':'Could not load the sign-in library',
   'โหลดไลบรารีเข้าสู่ระบบไม่สำเร็จ — ต้องมีอินเทอร์เน็ต':'Could not load the sign-in library — an internet connection is required',
   'Graph ไม่ได้ส่ง webLink กลับมา':'Graph did not return a webLink',
-  'ยังไม่ได้ลงชื่อเข้าใช้ Outlook — ไปที่ ☰ → Send to email → 🌐 Outlook เว็บ แล้วกดลงชื่อเข้าใช้ (ทำครั้งเดียว)':'Not signed in to Outlook — go to ☰ → Send to email → 🌐 Outlook on the web and sign in (one time only)',
+  'เซสชัน Outlook หมดอายุ — กดปุ่มอีกครั้งเพื่อลงชื่อเข้าใช้ใหม่':'Your Outlook session expired — tap the button again to sign in',
+  'ต้องลงชื่อเข้าใช้ Outlook ครั้งเดียวก่อน แล้วปุ่มนี้จะกลับเป็น Send to email':'Sign in to Outlook once and this button goes back to Send to email',
+  'ลงชื่อเข้าใช้แล้ว ✓ กด ✉ อีกครั้งเพื่อเปิด draft — ครั้งต่อไปไม่ต้องลงชื่อแล้ว':'Signed in ✓ tap ✉ again to open the draft — no sign-in needed after this',
   'เปิด draft ใน Outlook เว็บแล้ว ✓ (แนบ PDF + ใส่ผู้รับให้แล้ว) — ตรวจแล้วกดส่ง':'Draft opened in Outlook on the web ✓ (PDF attached, recipients filled in) — check it and press Send',
   'เปิด draft ใน Outlook เว็บแล้ว ✓ แต่ยังไม่มีผู้รับ — เพิ่มได้ที่ ☰ → Send to email → จัดการผู้รับ':'Draft opened in Outlook on the web ✓ but it has no recipients — add them under ☰ → Send to email → Manage recipients',
   'Graph ไม่ได้ส่ง uploadUrl กลับมา':'Graph did not return an uploadUrl',
@@ -7564,6 +7614,8 @@ function openGraphSettingsModal(onDone){
     const btn = ov.querySelector('.gr-signin'); btn.disabled = true;
     try{
       await graphToken(true);               // interactive — this is the one-time login
+      _graphForceLogin = false;
+      refreshEmailButtonsLayout();          // keep ✉ in step with signing in from here
       render();
       flashStatus('ลงชื่อเข้าใช้แล้ว ✓ ครั้งต่อไปจะเปิด draft ให้อัตโนมัติ', 6000);
     }catch(err){
@@ -7578,6 +7630,7 @@ function openGraphSettingsModal(onDone){
       const acc = app && (app.getActiveAccount() || app.getAllAccounts()[0]);
       if(app && acc) await app.logoutPopup({ account: acc });
     }catch(err){ /* a cancelled logout popup is not an error worth showing */ }
+    refreshEmailButtonsLayout();   // ✉ goes back to offering the sign-in
     render();
   };
 }
