@@ -146,7 +146,12 @@ function defaultAppSettings_() {
     // Neither value is a secret: a SPA registration is a public client and the
     // client id is visible in the browser anyway.
     graphClientId: '',
-    graphTenantId: 'common'
+    graphTenantId: 'common',
+    // ✉ email draft: whether the preview's draft box can be edited per order
+    // (one-off, not saved), and the shared template the draft is built from.
+    // Empty template ⇒ the frontend falls back to its built-in wording.
+    emailDraftEditable: false,
+    emailDraftTemplate: ''
   };
 }
 function readAppSettings_() {
@@ -176,7 +181,7 @@ function setAppSettings(params) {
   lock.waitLock(10000);
   try {
     const s = readAppSettings_();
-    ['fmtToolbar', 'runNumberEnabled', 'paSend', 'paUrl', 'hideSendEmail', 'hideAutoEmail', 'defaultInvoiceAddress', 'defaultShippingAddress', 'runPrefix', 'runYear', 'runNext', 'graphClientId', 'graphTenantId'].forEach(function(k) {
+    ['fmtToolbar', 'runNumberEnabled', 'paSend', 'paUrl', 'hideSendEmail', 'hideAutoEmail', 'defaultInvoiceAddress', 'defaultShippingAddress', 'runPrefix', 'runYear', 'runNext', 'graphClientId', 'graphTenantId', 'emailDraftEditable', 'emailDraftTemplate'].forEach(function(k) {
       if (patch[k] !== undefined) s[k] = patch[k];
     });
     s.fmtToolbar = !!s.fmtToolbar;
@@ -192,6 +197,10 @@ function setAppSettings(params) {
     s.runNext = Math.max(1, parseInt(s.runNext, 10) || 1);
     s.graphClientId = String(s.graphClientId || '').trim().slice(0, 100);
     s.graphTenantId = String(s.graphTenantId || 'common').trim().slice(0, 100) || 'common';
+    s.emailDraftEditable = !!s.emailDraftEditable;
+    // Not trimmed: leading/trailing blank lines are legitimate formatting in a
+    // mail body. Generous cap — this is a whole email template, not a field.
+    s.emailDraftTemplate = String(s.emailDraftTemplate || '').slice(0, 4000);
     writeAppSettings_(s);
     return { success: true, settings: s };
   } finally {
