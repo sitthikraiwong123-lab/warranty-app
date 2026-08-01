@@ -19,9 +19,13 @@ const html = fs.readFileSync(appUrl, 'utf8');
 const viewer = fs.readFileSync(viewerUrl, 'utf8');
 const worker = fs.readFileSync(workerUrl, 'utf8');
 
-// The 3D feature is discoverable from the existing slide-out menu, but the
-// heavyweight renderer is loaded only when the operator opens it.
-assert.match(html, /id="btnMachine3D"/);
+// The 3D feature is Power User-only. Its heavyweight renderer is loaded only
+// when an authenticated operator opens it.
+assert.match(html, /<button class="tm-item tm-admin" id="btnMachine3D"[^>]*style="display:none;"[^>]*>[\s\S]*?Machine 3D Parts View[\s\S]*?<\/button>/);
+assert.ok(
+  html.indexOf('id="btnMachine3D"') > html.indexOf('ผู้ดูแลระบบ'),
+  'Machine 3D Parts View belongs inside the Power User section'
+);
 assert.match(html, /import\('\.\/machine-viewer\.js'\)/);
 assert.doesNotMatch(html, /<script[^>]+src="[^"]*three/i);
 assert.match(html, /getParts:\s*\(\)=>[\s\S]{0,900}_pendingPartsCache/,
@@ -80,15 +84,23 @@ assert.deepEqual(findMatchingDatabaseParts(null, ['ccd']), []);
 assert.deepEqual(findMatchingDatabaseParts(rows, []), []);
 assert.deepEqual(findMatchingDatabaseParts(rows, ['vacuum'], 0), []);
 
-// No runtime dependency on third-party image hosts: Three.js is vendored and
-// the full viewer shell is cached for the installed PWA.
+// No runtime dependency on third-party image hosts: Three.js is vendored. The
+// large 3D bundle must not compete with startup sync; it is cached lazily after
+// the Power User opens the viewer for the first time.
 assert.match(viewer, /from '\.\/vendor\/three\.module\.min\.js'/);
 assert.match(viewer, /from '\.\/vendor\/OrbitControls\.js'/);
 assert.doesNotMatch(viewer, /https?:\/\//);
-assert.match(worker, /machine-viewer\.js/);
-assert.match(worker, /machine-viewer-core\.mjs/);
-assert.match(worker, /vendor\/three\.module\.min\.js/);
-assert.match(worker, /vendor\/three\.core\.min\.js/);
+const shell = worker.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] || '';
+assert.doesNotMatch(shell, /machine-viewer|vendor\/three|OrbitControls/);
+assert.match(worker, /const CACHE = 'schmoll-export-v5'/);
+assert.match(worker, /url\.origin === self\.location\.origin[\s\S]{0,200}c\.put\(req, copy\)/,
+  'same-origin 3D assets are cached lazily after first use');
+
+// Read-only sync survives transient mobile-network failures. Mutation calls do
+// not use this retry path, preventing duplicate writes.
+assert.match(html, /const LOOKUP_SYNC_MAX_ATTEMPTS\s*=\s*3/);
+assert.match(html, /async function lookupSyncApiCall\(/);
+assert.match(html, /lookupSyncApiCall\(action,\s*\{since:\s*lookupCache\.syncedAt\}\)/);
 
 // Responsive controls and an explicit no-WebGL recovery path are part of the
 // user-visible contract, not optional polish.

@@ -3,18 +3,12 @@
  * the Sarabun font are all inlined, so caching the few static files below is
  * enough to run completely offline. Lookup/sync calls to Google Apps Script
  * are always fetched from the network (never cached) so data stays fresh. */
-const CACHE = 'schmoll-export-v4';
+const CACHE = 'schmoll-export-v5';
 const SHELL = [
   './',
   './Warranty%20App.html',
   './manifest.json',
-  './icon-192.png',
-  './machine-viewer.js',
-  './machine-viewer-core.mjs',
-  './vendor/three.module.min.js',
-  './vendor/three.core.min.js',
-  './vendor/OrbitControls.js',
-  './vendor/THREE-LICENSE.txt'
+  './icon-192.png'
 ];
 
 self.addEventListener('install', (e) => {
