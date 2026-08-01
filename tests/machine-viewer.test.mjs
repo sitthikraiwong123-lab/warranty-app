@@ -18,6 +18,7 @@ const workerUrl = new URL('../sw.js', import.meta.url);
 const html = fs.readFileSync(appUrl, 'utf8');
 const viewer = fs.readFileSync(viewerUrl, 'utf8');
 const worker = fs.readFileSync(workerUrl, 'utf8');
+assert.match(html, /v2\.12\.0 · 01-Aug-2026/);
 
 // The 3D feature is Power User-only. Its heavyweight renderer is loaded only
 // when an authenticated operator opens it.
@@ -44,11 +45,13 @@ for (const model of Object.values(MACHINE_MODELS)) {
   assert.ok(model.components.some((part) => part.kind === 'ccd'));
 }
 assert.deepEqual(MACHINE_MODELS.MXY6.visual, {
-  profile: 'photo-reference-v1',
+  profile: 'photo-reference-v2',
   referencePhotoCount: 5,
   frontDoorCount: 3,
   hasServiceBay: true,
-  bodyAspect: 3.1
+  bodyAspect: 3.1,
+  detailLevel: 2,
+  hasPaintedMetalMaterial: true
 });
 assert.equal(MACHINE_MODELS.EXY6.visual.profile, 'procedural-reference',
   'EXY-6 remains on the existing generic model until its own photos arrive');
@@ -104,6 +107,24 @@ assert.match(viewer, /model\.id === 'MXY6'/);
 assert.match(viewer, /mxy-granite-base/);
 assert.match(viewer, /mxy-front-door-/);
 assert.match(viewer, /mxy-service-bay/);
+assert.match(viewer, /mxy-side-service-door-/,
+  'photo 2 service-door seams and handles are represented');
+assert.match(viewer, /mxy-door-handle-/,
+  'each glazed front door has its visible pull handle');
+assert.match(viewer, /mxy-gas-strut-/,
+  'front doors include visible opening hardware');
+assert.match(viewer, /mxy-roof-vent-/,
+  'top ventilation slots follow the open-side reference photo');
+assert.match(viewer, /mxy-cable-chain-/,
+  'the six-station cable routing is represented');
+assert.match(viewer, /mxy-bellows-/,
+  'linear-axis bellows are visible below the station bed');
+assert.match(viewer, /MeshPhysicalMaterial/,
+  'painted panels use a physical material instead of flat plastic shading');
+assert.doesNotMatch(viewer, /SpriteMaterial\(\{ map: texture, depthTest: false \}\)/,
+  'station labels must not render through the solid rear service doors');
+assert.match(viewer, /stationLabels\.forEach[\s\S]{0,220}camera\.position\.z/,
+  'station labels are hidden when the operator rotates behind the machine');
 assert.match(viewer, /rotationAxis[^\n]*'x'/,
   'photo-reference front glass opens upward around its top hinge');
 assert.doesNotMatch(viewer, /PCFSoftShadowMap/,
@@ -112,7 +133,7 @@ assert.doesNotMatch(viewer, /mxy-common-bed[^\n]*station-3-table/,
   'the shared bed must not incorrectly select station 3');
 const shell = worker.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] || '';
 assert.doesNotMatch(shell, /machine-viewer|vendor\/three|OrbitControls/);
-assert.match(worker, /const CACHE = 'schmoll-export-v6'/);
+assert.match(worker, /const CACHE = 'schmoll-export-v7'/);
 assert.match(worker, /url\.origin === self\.location\.origin[\s\S]{0,200}c\.put\(req, copy\)/,
   'same-origin 3D assets are cached lazily after first use');
 

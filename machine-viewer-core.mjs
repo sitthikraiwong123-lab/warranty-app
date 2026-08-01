@@ -69,8 +69,9 @@ export const MACHINE_MODELS = Object.freeze({
     note: 'Reference model · S50 generation · 6 independent stations',
     stationCount: 6,
     visual: Object.freeze({
-      profile: 'photo-reference-v1', referencePhotoCount: 5,
-      frontDoorCount: 3, hasServiceBay: true, bodyAspect: 3.1
+      profile: 'photo-reference-v2', referencePhotoCount: 5,
+      frontDoorCount: 3, hasServiceBay: true, bodyAspect: 3.1,
+      detailLevel: 2, hasPaintedMetalMaterial: true
     }),
     theme: Object.freeze({ shell: 0xe9eaec, frame: 0x30343a, accent: 0xc9151e, glass: 0x1f3545 }),
     components: SHARED_COMPONENTS

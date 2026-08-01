@@ -121,6 +121,7 @@ class MachineViewer {
     this.doorPivots = [];
     this.selectableMeshes = [];
     this.selectedMeshes = [];
+    this.stationLabels = [];
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -247,13 +248,14 @@ class MachineViewer {
     context.fillStyle = '#ffffff'; context.font = '700 64px Arial'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(String(number), 64, 67);
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false }));
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: true }));
     sprite.position.set(x, 4.7, 1.62);
     sprite.scale.set(.52, .52, .52);
     sprite.renderOrder = 4;
     sprite.userData.componentId = `station-${number}-spindle`;
     sprite.userData.selectable = true;
     this.selectableMeshes.push(sprite);
+    this.stationLabels.push(sprite);
     return sprite;
   }
 
@@ -272,8 +274,14 @@ class MachineViewer {
     this.doorPivots = [];
     this.selectableMeshes = [];
     this.selectedMeshes = [];
+    this.stationLabels = [];
 
-    const shellMat = makeMaterial(theme.shell, { roughness: .7, metalness: .08 });
+    const shellMat = model.id === 'MXY6'
+      ? new THREE.MeshPhysicalMaterial({
+        color: theme.shell, roughness: .42, metalness: .14,
+        clearcoat: .22, clearcoatRoughness: .62
+      })
+      : makeMaterial(theme.shell, { roughness: .7, metalness: .08 });
     const frameMat = makeMaterial(theme.frame, { roughness: .45, metalness: .42 });
     const accentMat = makeMaterial(theme.accent, { roughness: .42, metalness: .18 });
     const steelMat = makeMaterial(0x9aa2aa, { roughness: .3, metalness: .72 });
@@ -283,7 +291,7 @@ class MachineViewer {
 
     if (model.id === 'MXY6') {
       this.buildMXY6PhotoReference({ shellMat, frameMat, accentMat, steelMat, darkMat, glassMat });
-      this.status.textContent = `${model.name} · ${model.stationCount} สถานี · Photo reference v1`;
+      this.status.textContent = `${model.name} · ${model.stationCount} สถานี · Photo reference v2`;
       this.applyStateToScene(true);
       return;
     }
@@ -486,11 +494,49 @@ class MachineViewer {
     this.shellMeshes.push(roof, back, leftCabinet, rightCabinet, leftSlant, rightSlant);
     this.machineRoot.add(roof, back, leftCabinet, rightCabinet, leftSlant, rightSlant);
 
+    // Photo 2 shows four large service panels with recessed black pulls along
+    // the long rear/side skin. Keep these as shell details so cutaway mode
+    // removes them together with the exterior panels.
+    const exteriorDetails = [];
+    const panelCenters = [-4.85, -1.62, 1.62, 4.85];
+    panelCenters.forEach((x, panelIndex) => {
+      const outlineTop = this.makeBox(`mxy-side-service-door-${panelIndex + 1}-top`, [3.05, .025, .025], [x, 4.49, -1.985], darkMat);
+      const outlineBottom = this.makeBox(`mxy-side-service-door-${panelIndex + 1}-bottom`, [3.05, .025, .025], [x, 1.69, -1.985], darkMat);
+      const outlineLeft = this.makeBox(`mxy-side-service-door-${panelIndex + 1}-left`, [.025, 2.82, .025], [x - 1.525, 3.09, -1.985], darkMat);
+      const handle = this.makeBox(`mxy-side-service-door-${panelIndex + 1}-handle`, [.48, .18, .08], [x + .68, 3.05, -2.035], darkMat);
+      exteriorDetails.push(outlineTop, outlineBottom, outlineLeft, handle);
+    });
+    const finalDoorSeam = this.makeBox('mxy-side-service-door-4-right', [.025, 2.82, .025], [6.375, 3.09, -1.985], darkMat);
+    exteriorDetails.push(finalDoorSeam);
+
+    // Vent groups visible on the top covers in photos 3/4.
+    [-4.6, -2.2, .2, 2.6, 5].forEach((clusterX, clusterIndex) => {
+      for (let slot = 0; slot < 5; slot += 1) {
+        exteriorDetails.push(this.makeBox(
+          `mxy-roof-vent-${clusterIndex + 1}-${slot + 1}`,
+          [.42, .025, .035],
+          [clusterX, 4.795, -1.23 + slot * .12],
+          darkMat
+        ));
+      }
+    });
+    this.shellMeshes.push(...exteriorDetails);
+    this.machineRoot.add(...exteriorDetails);
+
     const topRail = this.makeBox('mxy-top-rail', [12.55, .24, .28], [0, 4.47, -.72], frameMat);
     const bed = this.makeBox('mxy-common-bed', [12.22, .24, 1.52], [0, 2.18, .35], steelMat);
     const frontRail = this.makeBox('mxy-front-linear-rail', [12.1, .13, .18], [0, 2.42, 1.02], darkMat);
     const rearRail = this.makeBox('mxy-rear-linear-rail', [12.1, .13, .18], [0, 2.42, -.32], darkMat);
     this.machineRoot.add(topRail, bed, frontRail, rearRail);
+
+    // Folded black bellows below the work bed are a strong visual feature in
+    // the open-front reference and make the long-axis structure read correctly.
+    for (let fold = 0; fold < 25; fold += 1) {
+      const x = -5.76 + fold * .48;
+      const bellow = this.makeBox(`mxy-bellows-${fold + 1}`, [.18, .56, 1.18], [x, 1.83, .18], darkMat);
+      bellow.rotation.z = fold % 2 ? .055 : -.055;
+      this.machineRoot.add(bellow);
+    }
 
     const stationPitch = 1.86;
     for (let station = 1; station <= 6; station += 1) {
@@ -518,6 +564,23 @@ class MachineViewer {
       const toolRack = this.makeBox(`mxy-station-${station}-tool-rack`, [1.28, .18, .34], [x, 2.52, -.55], darkMat, toolId);
       this.machineRoot.add(backPlate, motor, carriage, greenMount, spindle, ccd, table, clamp, toolRack);
 
+      const motorCap = new THREE.Mesh(new THREE.CylinderGeometry(.29, .29, .13, 20), copperMat.clone());
+      motorCap.name = `mxy-station-${station}-motor-cap`;
+      motorCap.rotation.x = Math.PI / 2;
+      motorCap.position.set(x, 3.82, -.24);
+      motorCap.userData.componentId = spindleId;
+      motorCap.userData.selectable = true;
+      motorCap.castShadow = true;
+      this.selectableMeshes.push(motorCap);
+
+      const collet = new THREE.Mesh(new THREE.CylinderGeometry(.07, .1, .28, 14), darkMat.clone());
+      collet.name = `mxy-station-${station}-collet`;
+      collet.position.set(x, 2.18, .05);
+      collet.userData.componentId = spindleId;
+      collet.userData.selectable = true;
+      this.selectableMeshes.push(collet);
+      this.machineRoot.add(motorCap, collet);
+
       for (let tool = 0; tool < 5; tool += 1) {
         const bit = new THREE.Mesh(new THREE.CylinderGeometry(.025, .025, .24, 7), steelMat.clone());
         bit.position.set(x - .42 + tool * .21, 2.72, -.55);
@@ -533,7 +596,24 @@ class MachineViewer {
       const signalCable = this.makeMXYHose([
         [x + .34, 4.43, -.83], [x + .52, 4.05, -.4], [x + .34, 3.58, -.15]
       ], .027, station % 2 ? 0xc9252d : 0x2673b8, spindleId);
-      this.machineRoot.add(vacuumHose, signalCable, this.makeStationLabel(station, x));
+      const pneumaticCable = this.makeMXYHose([
+        [x + .48, 4.42, -.8], [x + .68, 3.98, -.24], [x + .48, 3.5, -.03]
+      ], .021, station % 2 ? 0x2673b8 : 0xc9252d, spindleId);
+
+      const cableChain = new THREE.Group();
+      cableChain.name = `mxy-cable-chain-${station}`;
+      for (let link = 0; link < 8; link += 1) {
+        const chainLink = this.makeBox(
+          `mxy-cable-chain-${station}-${link + 1}`,
+          [.13, .1, .24],
+          [x - .53 + link * .15, 4.38 - Math.sin((link / 7) * Math.PI) * .1, -.95],
+          darkMat,
+          spindleId
+        );
+        chainLink.rotation.z = -.06 + link * .017;
+        cableChain.add(chainLink);
+      }
+      this.machineRoot.add(vacuumHose, signalCable, pneumaticCable, cableChain, this.makeStationLabel(station, x));
     }
 
     const vacuumManifold = this.makeBox('mxy-vacuum-manifold', [11.8, .22, .28], [0, 4.38, -.86], offWhiteMat, 'vacuum-system');
@@ -553,6 +633,31 @@ class MachineViewer {
     for (let block = 0; block < 6; block += 1) {
       serviceBay.add(this.makeBox(`mxy-service-power-${block + 1}`, [1.45, .42, .45], [-4.55 + block * 1.82, 1.9, .04], darkMat));
     }
+    const breakerRail = this.makeBox('mxy-service-breaker-rail', [.18, 1.72, .22], [-5.72, 3.28, .2], steelMat);
+    serviceBay.add(breakerRail);
+    for (let breaker = 0; breaker < 11; breaker += 1) {
+      const unit = this.makeBox(
+        `mxy-service-breaker-${breaker + 1}`,
+        [.32, .12, .2],
+        [-5.72, 2.48 + breaker * .145, .34],
+        offWhiteMat
+      );
+      const switchTab = this.makeBox(
+        `mxy-service-breaker-${breaker + 1}-tab`,
+        [.12, .035, .03],
+        [-5.72, 2.48 + breaker * .145, .46],
+        breaker % 4 === 0 ? accentMat : darkMat
+      );
+      serviceBay.add(unit, switchTab);
+    }
+    for (let cable = 0; cable < 8; cable += 1) {
+      const cableX = -4.65 + cable * 1.25;
+      const serviceCable = this.makeMXYHose([
+        [cableX, 4.08, .26], [cableX + .18, 3.58, .48], [cableX, 2.86, .35]
+      ], .025, cable % 3 === 0 ? 0x2d9b62 : (cable % 2 ? 0x1d242b : 0x2673b8));
+      serviceCable.name = `mxy-service-cable-${cable + 1}`;
+      serviceBay.add(serviceCable);
+    }
     this.machineRoot.add(serviceBay);
 
     const doorWidths = [3.92, 4.08, 3.92];
@@ -564,12 +669,17 @@ class MachineViewer {
     this.machineRoot.add(brand, series);
 
     [-6.62, 6.62].forEach((x, index) => {
+      const emergencyBase = new THREE.Mesh(new THREE.CylinderGeometry(.2, .2, .055, 20), offWhiteMat.clone());
+      emergencyBase.name = `mxy-emergency-stop-${index + 1}-yellow-base`;
+      emergencyBase.material.color.setHex(0xe5bb24);
+      emergencyBase.rotation.x = Math.PI / 2 - .4;
+      emergencyBase.position.set(x, 2.81, 1.995);
       const emergency = new THREE.Mesh(new THREE.CylinderGeometry(.12, .12, .12, 16), accentMat.clone());
       emergency.name = `mxy-emergency-stop-${index + 1}`;
       emergency.rotation.x = Math.PI / 2 - .4;
       emergency.position.set(x, 2.83, 2.04);
       emergency.castShadow = true;
-      this.machineRoot.add(emergency);
+      this.machineRoot.add(emergencyBase, emergency);
     });
   }
 
@@ -588,7 +698,33 @@ class MachineViewer {
     const glass = this.makeBox(`mxy-front-door-${index}-glass`, [width - .22, 1.78, .055], [0, -1.02, .03], glassMat, 'front-safety-door');
     const redStripe = this.makeBox(`mxy-front-door-${index}-stripe`, [width * .72, .035, .025], [.12, -1.15, .095], accentMat, 'front-safety-door');
     redStripe.rotation.z = -.07;
-    pivot.add(top, bottom, left, right, glass, redStripe);
+    const handle = this.makeBox(`mxy-door-handle-${index}`, [width * .28, .1, .16], [0, -1.86, .18], frameMat, 'front-safety-door');
+    const handleLeft = this.makeBox(`mxy-door-handle-${index}-left-mount`, [.11, .24, .12], [-width * .14, -1.78, .13], frameMat, 'front-safety-door');
+    const handleRight = this.makeBox(`mxy-door-handle-${index}-right-mount`, [.11, .24, .12], [width * .14, -1.78, .13], frameMat, 'front-safety-door');
+    const whiteSticker = this.makeBox(`mxy-door-sticker-${index}-white`, [.62, .35, .025], [-.46, -.46, .11], shellMat);
+    const warningStickerMat = shellMat.clone();
+    warningStickerMat.color.setHex(0xe2bd29);
+    warningStickerMat.roughness = .58;
+    const yellowSticker = this.makeBox(`mxy-door-sticker-${index}-yellow`, [.46, .28, .026], [.45, -.5, .112], warningStickerMat);
+
+    const gasStrutLeft = this.makeBox(`mxy-gas-strut-${index}-left`, [.075, 1.24, .075], [-width / 2 + .28, -.74, -.13], frameMat, 'front-safety-door');
+    const gasStrutRight = this.makeBox(`mxy-gas-strut-${index}-right`, [.075, 1.24, .075], [width / 2 - .28, -.74, -.13], frameMat, 'front-safety-door');
+    gasStrutLeft.rotation.z = -.2;
+    gasStrutRight.rotation.z = .2;
+
+    const hingeLeft = new THREE.Mesh(new THREE.CylinderGeometry(.09, .09, .34, 14), frameMat.clone());
+    hingeLeft.name = `mxy-door-hinge-${index}-left`;
+    hingeLeft.rotation.z = Math.PI / 2;
+    hingeLeft.position.set(-width * .3, -.02, -.04);
+    const hingeRight = hingeLeft.clone();
+    hingeRight.name = `mxy-door-hinge-${index}-right`;
+    hingeRight.position.x = width * .3;
+
+    pivot.add(
+      top, bottom, left, right, glass, redStripe,
+      handle, handleLeft, handleRight, whiteSticker, yellowSticker,
+      gasStrutLeft, gasStrutRight, hingeLeft, hingeRight
+    );
     this.machineRoot.add(pivot);
     this.doorPivots.push(pivot);
   }
@@ -769,6 +905,9 @@ class MachineViewer {
   render() {
     if (!this.renderer || !this.scene || !this.camera) return;
     this.controls.update();
+    this.stationLabels.forEach((label) => {
+      label.visible = this.camera.position.z >= this.controls.target.z;
+    });
     this.doorPivots.forEach((pivot) => {
       const target = this.state.doorsOpen ? pivot.userData.openRotation : pivot.userData.closedRotation;
       const axis = pivot.userData.rotationAxis || 'y';
