@@ -102,6 +102,16 @@ assert.match(html, /const LOOKUP_SYNC_MAX_ATTEMPTS\s*=\s*3/);
 assert.match(html, /async function lookupSyncApiCall\(/);
 assert.match(html, /lookupSyncApiCall\(action,\s*\{since:\s*lookupCache\.syncedAt\}\)/);
 
+// Startup gives the database sync exclusive priority instead of making Apps
+// Script serve settings, outbox and pending-part requests at the same time.
+// Cached settings are still applied immediately without a network call.
+assert.match(html, /loadAppSettings\(\{cacheOnly:true\}\)/);
+assert.match(html, /async function lookupStartupSync\(\)[\s\S]{0,900}await lookupSync\(\)[\s\S]{0,500}Promise\.allSettled\(\[lookupFlushOutbox\(\),\s*loadAppSettings\(\)\]\)/);
+assert.match(html, /if\(lookupOnline\) lookupStartupSync\(\)/);
+const initLookup = html.match(/\(async function initLookupDb\(\)\{([\s\S]*?)\}\)\(\);/)?.[1] || '';
+assert.doesNotMatch(initLookup, /_loadPendingParts|lookupFlushOutbox|loadAppSettings/,
+  'startup must not issue competing or duplicate API calls beside the prioritized sync pipeline');
+
 // Responsive controls and an explicit no-WebGL recovery path are part of the
 // user-visible contract, not optional polish.
 assert.match(viewer, /@media\s*\(max-width:\s*720px\)/);
