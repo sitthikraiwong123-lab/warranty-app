@@ -373,6 +373,7 @@ function deltaSync(params) {
     success: true,
     machines: filtered(SHEETS.MACHINES, MACHINE_HEADER_MAP),
     parts: filtered(SHEETS.PARTS, PART_HEADER_MAP),
+    deletedKeys: getTombstonesSince_(since),
     companions: getCompanionSets(), // small list — always sent in full, even on delta sync
     syncedAt: Date.now()
   };
@@ -444,6 +445,23 @@ function getTombstoneSheet() {
 function recordTombstone(type, key) {
   const sheet = getTombstoneSheet();
   sheet.appendRow([type, String(key).trim().toLowerCase(), new Date()]);
+}
+
+// Delta sync must carry deletions too. Without this, removing a sheet row can
+// never remove the corresponding row from another device's merge-only cache.
+function getTombstonesSince_(since) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(TOMBSTONE_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const cutoff = Number(since) || 0;
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+  const out = [];
+  data.forEach(function(row) {
+    const deletedAt = row[2] instanceof Date ? row[2].getTime() : new Date(row[2]).getTime();
+    if (!isNaN(deletedAt) && deletedAt > cutoff) {
+      out.push({ Type: String(row[0] || ''), Key: String(row[1] || ''), DeletedAt: deletedAt });
+    }
+  });
+  return out;
 }
 
 // Returns true if this key was deleted recently enough that we should refuse
@@ -828,7 +846,10 @@ function deleteRecord(params) {
     sheet.deleteRow(r + 1);
     deletedCount++;
   }
-  if (deletedCount > 0) recordTombstone(params.type, keyValue);
+  if (deletedCount > 0) {
+    recordTombstone(params.type, keyValue);
+    SpreadsheetApp.flush();
+  }
   return { success: true, deletedCount: deletedCount };
 }
 
@@ -1216,6 +1237,9 @@ function softDeletePart(params) {
   getEditLogSheet_().appendRow([new Date(), editor, 'delete', key, '', JSON.stringify(oldData), '']);
   info.sheet.deleteRow(rowNum);
   recordTombstone('Part', key);
+  // Make the deletion and its tombstone visible before the client performs the
+  // authoritative refresh, so that refresh cannot read the pre-delete state.
+  SpreadsheetApp.flush();
 
   return { success: true, articleNo: articleNo, description: description };
 }
@@ -1458,14 +1482,23 @@ function getAllPartUsage(params) {
   return { success: true, rows: out };
 }
 
-// Guard for edit/delete: confirm the sheet row is still the one the client saw
-// (OrderId / ArticleNo / PartName), so a shifted row is never touched by mistake.
+// Guard for edit/delete: confirm the sheet row is still the exact record the
+// client saw. Every available field is compared so a shifted row can be found
+// safely without deleting another occurrence of the same part.
 function usageRowMatches_(vals, match) {
   if (!match) return true;
   function n(v) { return String(v == null ? '' : v).trim().toLowerCase(); }
-  if (match.OrderId != null && n(vals[1]) !== n(match.OrderId)) return false;   // col B
-  if (match.ArticleNo != null && n(vals[6]) !== n(match.ArticleNo)) return false; // col G
-  if (match.PartName != null && n(vals[7]) !== n(match.PartName)) return false;   // col H
+  function time(v) {
+    var t = v instanceof Date ? v.getTime() : new Date(v).getTime();
+    return isNaN(t) ? n(v) : String(t);
+  }
+  for (var i = 0; i < PARTUSAGE_HEADERS.length; i++) {
+    var key = PARTUSAGE_HEADERS[i];
+    if (match[key] == null) continue;
+    if (key === 'Timestamp') {
+      if (time(vals[i]) !== time(match[key])) return false;
+    } else if (n(vals[i]) !== n(match[key])) return false;
+  }
   return true;
 }
 
@@ -1474,11 +1507,30 @@ function deletePartUsage(params) {
   var row = Number(params && params.row);
   if (!row || row < 2) throw new Error('row required');
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTUSAGE_SHEET);
-  if (!sh || row > sh.getLastRow()) return { success: false, error: 'ไม่พบแถว — โหลดใหม่แล้วลองอีกครั้ง' };
-  var vals = sh.getRange(row, 1, 1, PARTUSAGE_HEADERS.length).getValues()[0];
-  if (!usageRowMatches_(vals, params && params.match)) return { success: false, error: 'ข้อมูลเปลี่ยนไป — โหลดใหม่แล้วลองอีกครั้ง' };
-  sh.deleteRow(row);
-  return { success: true };
+  if (!sh || sh.getLastRow() < 2) return { success: true, action: 'already_deleted' };
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    var match = params && params.match;
+    var rowNum = row <= sh.getLastRow() ? row : -1;
+    if (rowNum !== -1) {
+      var current = sh.getRange(rowNum, 1, 1, PARTUSAGE_HEADERS.length).getValues()[0];
+      if (!usageRowMatches_(current, match)) rowNum = -1;
+    }
+    // Another user may have deleted a row above this one, shifting its number.
+    // Locate the same record by identity instead of failing or touching the row
+    // that now happens to occupy the old index.
+    if (rowNum === -1 && match) {
+      var values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_HEADERS.length).getValues();
+      for (var i = values.length - 1; i >= 0; i--) {
+        if (usageRowMatches_(values[i], match)) { rowNum = i + 2; break; }
+      }
+    }
+    if (rowNum === -1) return { success: true, action: 'already_deleted' };
+    sh.deleteRow(rowNum);
+    SpreadsheetApp.flush();
+    return { success: true, action: 'deleted', row: rowNum };
+  } finally { try { lock.releaseLock(); } catch (e) {} }
 }
 
 // Edit fields of one PartUsage row. params: { row, match, updates:{Header:value} }
