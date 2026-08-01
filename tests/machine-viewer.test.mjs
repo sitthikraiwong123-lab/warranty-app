@@ -43,6 +43,15 @@ for (const model of Object.values(MACHINE_MODELS)) {
   assert.ok(model.components.some((part) => part.kind === 'spindle'));
   assert.ok(model.components.some((part) => part.kind === 'ccd'));
 }
+assert.deepEqual(MACHINE_MODELS.MXY6.visual, {
+  profile: 'photo-reference-v1',
+  referencePhotoCount: 5,
+  frontDoorCount: 3,
+  hasServiceBay: true,
+  bodyAspect: 3.1
+});
+assert.equal(MACHINE_MODELS.EXY6.visual.profile, 'procedural-reference',
+  'EXY-6 remains on the existing generic model until its own photos arrive');
 
 // Door/shell interactions are reversible and model switching starts clean.
 let state = createMachineViewState('MXY6');
@@ -90,9 +99,20 @@ assert.deepEqual(findMatchingDatabaseParts(rows, ['vacuum'], 0), []);
 assert.match(viewer, /from '\.\/vendor\/three\.module\.min\.js'/);
 assert.match(viewer, /from '\.\/vendor\/OrbitControls\.js'/);
 assert.doesNotMatch(viewer, /https?:\/\//);
+assert.match(viewer, /buildMXY6PhotoReference\(/);
+assert.match(viewer, /model\.id === 'MXY6'/);
+assert.match(viewer, /mxy-granite-base/);
+assert.match(viewer, /mxy-front-door-/);
+assert.match(viewer, /mxy-service-bay/);
+assert.match(viewer, /rotationAxis[^\n]*'x'/,
+  'photo-reference front glass opens upward around its top hinge');
+assert.doesNotMatch(viewer, /PCFSoftShadowMap/,
+  'viewer avoids the deprecated Three.js soft-shadow mode');
+assert.doesNotMatch(viewer, /mxy-common-bed[^\n]*station-3-table/,
+  'the shared bed must not incorrectly select station 3');
 const shell = worker.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] || '';
 assert.doesNotMatch(shell, /machine-viewer|vendor\/three|OrbitControls/);
-assert.match(worker, /const CACHE = 'schmoll-export-v5'/);
+assert.match(worker, /const CACHE = 'schmoll-export-v6'/);
 assert.match(worker, /url\.origin === self\.location\.origin[\s\S]{0,200}c\.put\(req, copy\)/,
   'same-origin 3D assets are cached lazily after first use');
 

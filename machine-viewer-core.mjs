@@ -68,6 +68,10 @@ export const MACHINE_MODELS = Object.freeze({
     name: 'Schmoll MXY-6',
     note: 'Reference model · S50 generation · 6 independent stations',
     stationCount: 6,
+    visual: Object.freeze({
+      profile: 'photo-reference-v1', referencePhotoCount: 5,
+      frontDoorCount: 3, hasServiceBay: true, bodyAspect: 3.1
+    }),
     theme: Object.freeze({ shell: 0xe9eaec, frame: 0x30343a, accent: 0xc9151e, glass: 0x1f3545 }),
     components: SHARED_COMPONENTS
   }),
@@ -76,6 +80,7 @@ export const MACHINE_MODELS = Object.freeze({
     name: 'Schmoll Eagle EXY-6',
     note: 'Reference model · Eagle series · 6 independent stations',
     stationCount: 6,
+    visual: Object.freeze({ profile: 'procedural-reference' }),
     theme: Object.freeze({ shell: 0xf5f5f2, frame: 0x27292d, accent: 0x9d0b19, glass: 0x243b4c }),
     components: SHARED_COMPONENTS
   })

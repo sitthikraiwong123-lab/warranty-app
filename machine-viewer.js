@@ -156,7 +156,7 @@ class MachineViewer {
     }
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
@@ -281,6 +281,13 @@ class MachineViewer {
     const glassMat = makeMaterial(theme.glass, { roughness: .15, metalness: .05, transparent: true, opacity: .28, side: THREE.DoubleSide });
     glassMat.depthWrite = false;
 
+    if (model.id === 'MXY6') {
+      this.buildMXY6PhotoReference({ shellMat, frameMat, accentMat, steelMat, darkMat, glassMat });
+      this.status.textContent = `${model.name} · ${model.stationCount} สถานี · Photo reference v1`;
+      this.applyStateToScene(true);
+      return;
+    }
+
     const base = this.makeBox('granite-base', [13.4, 1.28, 4.2], [0, .7, 0], frameMat);
     this.machineRoot.add(base);
     const plinth = this.makeBox('lower-shell', [13.1, 1.38, 3.9], [0, 1.55, 0], shellMat);
@@ -385,11 +392,213 @@ class MachineViewer {
     this.applyStateToScene(true);
   }
 
+  makeGraniteMaterial() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const context = canvas.getContext('2d');
+    const image = context.createImageData(canvas.width, canvas.height);
+    let seed = 0x4d585936;
+    for (let pixel = 0; pixel < canvas.width * canvas.height; pixel += 1) {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      const grain = 92 + ((seed >>> 24) % 72);
+      const offset = pixel * 4;
+      image.data[offset] = grain;
+      image.data[offset + 1] = grain + 2;
+      image.data[offset + 2] = grain + 1;
+      image.data[offset + 3] = 255;
+    }
+    context.putImageData(image, 0, 0);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(8, 2);
+    return new THREE.MeshStandardMaterial({ map: texture, color: 0xa7aaa8, roughness: .94, metalness: 0 });
+  }
+
+  makeMXYLabel(title, subtitle, width, height, position, align = 'center') {
+    const canvas = document.createElement('canvas');
+    canvas.width = 768;
+    canvas.height = 128;
+    const context = canvas.getContext('2d');
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.textAlign = align;
+    context.textBaseline = 'middle';
+    const x = align === 'left' ? 24 : canvas.width / 2;
+    context.fillStyle = '#4e5358';
+    context.font = '500 38px Arial, sans-serif';
+    context.fillText(title, x, 49);
+    if (subtitle) {
+      context.fillStyle = '#c81722';
+      context.font = '700 25px Arial, sans-serif';
+      context.fillText(subtitle, x, 92);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false });
+    const label = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+    label.position.set(...position);
+    label.renderOrder = 3;
+    return label;
+  }
+
+  makeMXYHose(points, radius, color, componentId = '') {
+    const curve = new THREE.CatmullRomCurve3(points.map((point) => new THREE.Vector3(...point)));
+    const hose = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 16, radius, 7, false),
+      makeMaterial(color, { roughness: .82, metalness: 0 })
+    );
+    hose.castShadow = true;
+    if (componentId) {
+      hose.userData.componentId = componentId;
+      hose.userData.selectable = true;
+      this.selectableMeshes.push(hose);
+    }
+    return hose;
+  }
+
+  buildMXY6PhotoReference(materials) {
+    const { shellMat, frameMat, accentMat, steelMat, darkMat, glassMat } = materials;
+    const graniteMat = this.makeGraniteMaterial();
+    const copperMat = makeMaterial(0xb8734f, { roughness: .38, metalness: .52 });
+    const greenMat = makeMaterial(0x55a678, { roughness: .52, metalness: .18 });
+    const offWhiteMat = makeMaterial(0xd9d7cd, { roughness: .72, metalness: .02 });
+    const mxyGlass = glassMat.clone();
+    mxyGlass.opacity = .48;
+    mxyGlass.roughness = .08;
+    mxyGlass.metalness = .16;
+    mxyGlass.depthWrite = false;
+
+    const granite = this.makeBox('mxy-granite-base', [14.15, .92, 3.92], [0, .56, -.02], graniteMat);
+    const lowerChassis = this.makeBox('mxy-lower-chassis', [13.82, .72, 3.72], [0, 1.35, -.03], shellMat);
+    const frontShadow = this.makeBox('mxy-front-shadow-gap', [12.8, .24, .18], [0, 1.62, 1.91], darkMat);
+    const frontFascia = this.makeBox('mxy-front-fascia', [13.72, .62, .2], [0, 1.93, 1.91], shellMat);
+    const lowerAccent = this.makeBox('mxy-lower-red-line', [13.3, .045, .035], [0, 2.17, 2.03], accentMat);
+    this.machineRoot.add(granite, lowerChassis, frontShadow, frontFascia, lowerAccent);
+
+    const roof = this.makeBox('mxy-roof-shell', [12.95, .2, 2.72], [0, 4.68, -.42], shellMat);
+    const back = this.makeBox('mxy-back-shell', [13.78, 3.05, .18], [0, 3.08, -1.88], shellMat);
+    const leftCabinet = this.makeBox('mxy-left-end-cabinet', [1.02, 2.9, 3.64], [-6.62, 3.18, -.03], shellMat);
+    const rightCabinet = this.makeBox('mxy-right-end-cabinet', [1.02, 2.9, 3.64], [6.62, 3.18, -.03], shellMat);
+    const leftSlant = this.makeBox('mxy-left-sloped-face', [.94, 2.58, .2], [-6.62, 3.23, 1.64], shellMat);
+    const rightSlant = this.makeBox('mxy-right-sloped-face', [.94, 2.58, .2], [6.62, 3.23, 1.64], shellMat);
+    leftSlant.rotation.x = rightSlant.rotation.x = -.4;
+    this.shellMeshes.push(roof, back, leftCabinet, rightCabinet, leftSlant, rightSlant);
+    this.machineRoot.add(roof, back, leftCabinet, rightCabinet, leftSlant, rightSlant);
+
+    const topRail = this.makeBox('mxy-top-rail', [12.55, .24, .28], [0, 4.47, -.72], frameMat);
+    const bed = this.makeBox('mxy-common-bed', [12.22, .24, 1.52], [0, 2.18, .35], steelMat);
+    const frontRail = this.makeBox('mxy-front-linear-rail', [12.1, .13, .18], [0, 2.42, 1.02], darkMat);
+    const rearRail = this.makeBox('mxy-rear-linear-rail', [12.1, .13, .18], [0, 2.42, -.32], darkMat);
+    this.machineRoot.add(topRail, bed, frontRail, rearRail);
+
+    const stationPitch = 1.86;
+    for (let station = 1; station <= 6; station += 1) {
+      const x = (station - 3.5) * stationPitch;
+      const spindleId = `station-${station}-spindle`;
+      const tableId = `station-${station}-table`;
+      const ccdId = `station-${station}-ccd`;
+      const toolId = `station-${station}-tool-magazine`;
+
+      const backPlate = this.makeBox(`mxy-station-${station}-backplate`, [1.32, 1.58, .18], [x, 3.55, -.94], darkMat, spindleId);
+      const motor = this.makeBox(`mxy-station-${station}-motor`, [.72, .76, .62], [x, 3.82, -.58], copperMat, spindleId);
+      const carriage = this.makeBox(`mxy-station-${station}-carriage`, [1.08, .44, .74], [x, 3.3, -.35], steelMat, spindleId);
+      const greenMount = this.makeBox(`mxy-station-${station}-tool-mount`, [.66, .25, .62], [x, 2.86, -.15], greenMat, toolId);
+      const spindle = new THREE.Mesh(new THREE.CylinderGeometry(.13, .2, 1.02, 18), steelMat.clone());
+      spindle.name = `mxy-station-${station}-spindle`;
+      spindle.position.set(x, 2.77, .05);
+      spindle.userData.componentId = spindleId;
+      spindle.userData.selectable = true;
+      spindle.castShadow = true;
+      this.selectableMeshes.push(spindle);
+
+      const ccd = this.makeBox(`mxy-station-${station}-ccd`, [.34, .3, .38], [x + .43, 3.03, .18], darkMat, ccdId);
+      const table = this.makeBox(`mxy-station-${station}-table`, [1.55, .11, 1.28], [x, 2.48, .36], steelMat, tableId);
+      const clamp = this.makeBox(`mxy-station-${station}-red-clamp`, [.42, .19, .34], [x, 2.55, 1.1], accentMat, tableId);
+      const toolRack = this.makeBox(`mxy-station-${station}-tool-rack`, [1.28, .18, .34], [x, 2.52, -.55], darkMat, toolId);
+      this.machineRoot.add(backPlate, motor, carriage, greenMount, spindle, ccd, table, clamp, toolRack);
+
+      for (let tool = 0; tool < 5; tool += 1) {
+        const bit = new THREE.Mesh(new THREE.CylinderGeometry(.025, .025, .24, 7), steelMat.clone());
+        bit.position.set(x - .42 + tool * .21, 2.72, -.55);
+        bit.userData.componentId = toolId;
+        bit.userData.selectable = true;
+        this.selectableMeshes.push(bit);
+        this.machineRoot.add(bit);
+      }
+
+      const vacuumHose = this.makeMXYHose([
+        [x - .47, 4.42, -.72], [x - .65, 4.12, -.2], [x - .5, 3.55, .02]
+      ], .065, 0xd6d1c6, 'vacuum-system');
+      const signalCable = this.makeMXYHose([
+        [x + .34, 4.43, -.83], [x + .52, 4.05, -.4], [x + .34, 3.58, -.15]
+      ], .027, station % 2 ? 0xc9252d : 0x2673b8, spindleId);
+      this.machineRoot.add(vacuumHose, signalCable, this.makeStationLabel(station, x));
+    }
+
+    const vacuumManifold = this.makeBox('mxy-vacuum-manifold', [11.8, .22, .28], [0, 4.38, -.86], offWhiteMat, 'vacuum-system');
+    this.machineRoot.add(vacuumManifold);
+
+    const serviceBay = new THREE.Group();
+    serviceBay.name = 'mxy-service-bay';
+    serviceBay.position.z = -1.65;
+    const serviceFrame = this.makeBox('mxy-service-bay-frame', [11.85, 2.05, .14], [0, 3.25, 0], frameMat);
+    serviceBay.add(serviceFrame);
+    for (let moduleIndex = 0; moduleIndex < 12; moduleIndex += 1) {
+      const x = -4.95 + moduleIndex * .9;
+      const module = this.makeBox(`mxy-service-drive-${moduleIndex + 1}`, [.62, 1.25, .18], [x, 3.32, .13], moduleIndex < 2 ? offWhiteMat : darkMat);
+      const indicator = this.makeBox(`mxy-service-indicator-${moduleIndex + 1}`, [.36, .06, .025], [x, 3.63, .24], moduleIndex % 3 === 0 ? accentMat : greenMat);
+      serviceBay.add(module, indicator);
+    }
+    for (let block = 0; block < 6; block += 1) {
+      serviceBay.add(this.makeBox(`mxy-service-power-${block + 1}`, [1.45, .42, .45], [-4.55 + block * 1.82, 1.9, .04], darkMat));
+    }
+    this.machineRoot.add(serviceBay);
+
+    const doorWidths = [3.92, 4.08, 3.92];
+    const doorCenters = [-4.12, 0, 4.12];
+    doorWidths.forEach((width, index) => this.buildMXYFrontDoor(index + 1, doorCenters[index], width, shellMat, frameMat, mxyGlass, accentMat));
+
+    const brand = this.makeMXYLabel('schmoll  |  maschinen', '', 3.35, .46, [0, 1.96, 2.025]);
+    const series = this.makeMXYLabel('MXY series', '', 1.6, .34, [5.35, 1.92, 2.03], 'center');
+    this.machineRoot.add(brand, series);
+
+    [-6.62, 6.62].forEach((x, index) => {
+      const emergency = new THREE.Mesh(new THREE.CylinderGeometry(.12, .12, .12, 16), accentMat.clone());
+      emergency.name = `mxy-emergency-stop-${index + 1}`;
+      emergency.rotation.x = Math.PI / 2 - .4;
+      emergency.position.set(x, 2.83, 2.04);
+      emergency.castShadow = true;
+      this.machineRoot.add(emergency);
+    });
+  }
+
+  buildMXYFrontDoor(index, centerX, width, shellMat, frameMat, glassMat, accentMat) {
+    const pivot = new THREE.Group();
+    pivot.name = `mxy-front-door-${index}`;
+    pivot.position.set(centerX, 4.49, .86);
+    pivot.userData.rotationAxis = 'x';
+    pivot.userData.closedRotation = -.42;
+    pivot.userData.openRotation = -1.48;
+
+    const top = this.makeBox(`mxy-front-door-${index}-top`, [width, .16, .13], [0, -.06, 0], frameMat, 'front-safety-door');
+    const bottom = this.makeBox(`mxy-front-door-${index}-bottom`, [width, .22, .14], [0, -2.02, 0], shellMat, 'front-safety-door');
+    const left = this.makeBox(`mxy-front-door-${index}-left`, [.13, 1.9, .13], [-width / 2 + .06, -1.03, 0], frameMat, 'front-safety-door');
+    const right = this.makeBox(`mxy-front-door-${index}-right`, [.13, 1.9, .13], [width / 2 - .06, -1.03, 0], frameMat, 'front-safety-door');
+    const glass = this.makeBox(`mxy-front-door-${index}-glass`, [width - .22, 1.78, .055], [0, -1.02, .03], glassMat, 'front-safety-door');
+    const redStripe = this.makeBox(`mxy-front-door-${index}-stripe`, [width * .72, .035, .025], [.12, -1.15, .095], accentMat, 'front-safety-door');
+    redStripe.rotation.z = -.07;
+    pivot.add(top, bottom, left, right, glass, redStripe);
+    this.machineRoot.add(pivot);
+    this.doorPivots.push(pivot);
+  }
+
   buildDoor(side, hingeX, shellMat, frameMat, glassMat) {
     const direction = side === 'left' ? 1 : -1;
     const pivot = new THREE.Group();
     pivot.name = `${side}-door-pivot`;
     pivot.position.set(hingeX, 4.42, 1.96);
+    pivot.userData.rotationAxis = 'y';
     pivot.userData.closedRotation = 0;
     pivot.userData.openRotation = direction * 1.16;
     const centerX = direction * 2.98;
@@ -411,7 +620,8 @@ class MachineViewer {
     this.doorButton.textContent = this.state.doorsOpen ? 'ปิดฝาหน้า' : 'เปิดฝาหน้า';
     if (immediate || this.reducedMotion) {
       this.doorPivots.forEach((pivot) => {
-        pivot.rotation.y = this.state.doorsOpen ? pivot.userData.openRotation : pivot.userData.closedRotation;
+        const axis = pivot.userData.rotationAxis || 'y';
+        pivot.rotation[axis] = this.state.doorsOpen ? pivot.userData.openRotation : pivot.userData.closedRotation;
         pivot.visible = this.state.shellVisible;
       });
     }
@@ -561,7 +771,8 @@ class MachineViewer {
     this.controls.update();
     this.doorPivots.forEach((pivot) => {
       const target = this.state.doorsOpen ? pivot.userData.openRotation : pivot.userData.closedRotation;
-      pivot.rotation.y += (target - pivot.rotation.y) * .13;
+      const axis = pivot.userData.rotationAxis || 'y';
+      pivot.rotation[axis] += (target - pivot.rotation[axis]) * .13;
     });
     this.renderer.render(this.scene, this.camera);
   }
