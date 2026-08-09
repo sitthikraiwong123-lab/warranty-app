@@ -88,6 +88,18 @@ function handleRequest(e) {
       case 'saveCompanionSet':   result = saveCompanionSet(params); break;
       case 'deleteCompanionSet': result = deleteCompanionSet(params); break;
       case 'recordPartUsage':    result = recordPartUsage(params); break;
+      case 'save':
+      case 'pdf_preview':
+      case 'download':
+      case 'share':
+      case 'email_share':
+      case 'email_graph':
+      case 'email_deeplink':
+      case 'auto_email':
+      case 'legacy_export':
+        params.usageAction = params.action;
+        result = recordPartUsage(params);
+        break;
       case 'getPartUsage':       result = getPartUsage(params); break;
       case 'getAllPartUsage':    result = getAllPartUsage(params); break;
       case 'getPartUsageEvent':  result = getPartUsageEvent(params); break;
@@ -1348,7 +1360,7 @@ function usageText_(value, maxLength) {
 function apiInfo() {
   return {
     success: true,
-    appVersion: '2.12.3',
+    appVersion: '2.12.5',
     usageLogVersion: 3,
     usageCapabilities: ['append-events', 'idempotent-event-id', 'confirm-event', 'draft-recovery']
   };
@@ -1386,7 +1398,7 @@ function recordPartUsage(params) {
   if (items.length > PARTUSAGE_MAX_ITEMS) throw new Error('items exceeds 200');
   const eventId = usageText_((params && params.eventId) || Utilities.getUuid(), 200).trim();
   if (!eventId) throw new Error('eventId required');
-  const action = String((params && params.action) || 'legacy_export').trim();
+  const action = String((params && params.usageAction) || (params && params.action) || 'legacy_export').trim();
   if (!PARTUSAGE_ACTIONS[action]) throw new Error('invalid usage action');
 
   const sh = getPartUsageSheet_();
