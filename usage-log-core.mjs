@@ -20,6 +20,31 @@ function recordedByText(value) {
   return text(value).trim() || '-';
 }
 
+function usageImageUrlList(source) {
+  const out = [];
+  const add = (value) => {
+    if (!value) return;
+    if (Array.isArray(value)) { value.forEach(add); return; }
+    if (typeof value === 'object') {
+      add(value.driveUrl || value.logUrl || value.imageURL || value.imageUrl || value.url || value.src);
+      return;
+    }
+    const raw = text(value).trim();
+    if (!raw) return;
+    if (/^data:/i.test(raw)) return;
+    if (raw[0] === '[') {
+      try { add(JSON.parse(raw)); return; } catch (e) {}
+    }
+    raw.split(/\s*(?:\n|\||,)\s*/).forEach(part => {
+      const url = part.trim();
+      if (url && !out.includes(url)) out.push(url);
+    });
+  };
+  add(source && (source.imageURLs || source.imageUrls || source.images || source.photos));
+  add(source && (source.imageURL || source.imageUrl || source.driveUrl || source.logUrl || source.url));
+  return out;
+}
+
 export function createUsageEventId() {
   const cryptoObject = globalThis.crypto;
   if (cryptoObject && typeof cryptoObject.randomUUID === 'function') {
@@ -43,7 +68,8 @@ export function buildUsageEvent(order, options = {}) {
       qty: item.qty === '' || item.qty == null ? '' : item.qty,
       unit: text(item.qtyUnit),
       note: text(item.itemDesc),
-      setName: text(item.setName)
+      setName: text(item.setName),
+      imageURLs: usageImageUrlList(item)
     }));
 
   return {

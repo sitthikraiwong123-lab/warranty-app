@@ -88,6 +88,8 @@ function handleRequest(e) {
       case 'saveCompanionSet':   result = saveCompanionSet(params); break;
       case 'deleteCompanionSet': result = deleteCompanionSet(params); break;
       case 'recordPartUsage':    result = recordPartUsage(params); break;
+      case 'queuePartUsageEvent': result = queuePartUsageEvent(params); break;
+      case 'replayPartUsageOutbox': result = replayPartUsageOutbox(params); break;
       case 'save':
       case 'pdf_preview':
       case 'download':
@@ -1432,7 +1434,7 @@ const PARTUSAGE_SHEET = 'PartUsage';
 const PARTUSAGE_HEADERS = [
   'Timestamp', 'OrderId', 'Type', 'Customer', 'MachineNo', 'MachineType',
   'ArticleNo', 'PartName', 'Qty', 'Unit', 'Note', 'SetName', 'RecordedBy',
-  'EventId', 'Revision', 'Action'
+  'EventId', 'Revision', 'Action', 'ImageURLs'
 ];
 const PARTUSAGE_MAX_ITEMS = 200;
 const PARTUSAGE_DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
@@ -1441,6 +1443,10 @@ const PARTUSAGE_ACTIONS = {
   email_share:true, email_graph:true, email_deeplink:true,
   auto_email:true, legacy_export:true
 };
+const PARTUSAGE_OUTBOX_SHEET = 'PartUsageOutbox';
+const PARTUSAGE_OUTBOX_HEADERS = [
+  'QueuedAt','EventId','Status','OrderId','ExpectedItems','RecordedBy','LastError','PayloadJson','ReplayedAt'
+];
 
 function usageText_(value, maxLength) {
   var out = String(value == null ? '' : value).slice(0, maxLength || 500);
@@ -1451,9 +1457,9 @@ function usageText_(value, maxLength) {
 function apiInfo() {
   return {
     success: true,
-    appVersion: '2.12.17',
+    appVersion: '2.12.18',
     usageLogVersion: 3,
-    usageCapabilities: ['append-events', 'idempotent-event-id', 'confirm-event', 'draft-recovery']
+    usageCapabilities: ['append-events', 'idempotent-event-id', 'confirm-event', 'draft-recovery', 'online-outbox']
   };
 }
 
@@ -1479,6 +1485,84 @@ function getPartUsageSheet_() {
   return ensurePartUsageHeaders_(sh);
 }
 
+function ensurePartUsageOutboxHeaders_(sh) {
+  if (sh.getLastRow() < 1) {
+    sh.appendRow(PARTUSAGE_OUTBOX_HEADERS);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+  var current = sh.getRange(1, 1, 1, PARTUSAGE_OUTBOX_HEADERS.length).getValues()[0];
+  var differs = PARTUSAGE_OUTBOX_HEADERS.some(function (header, index) { return current[index] !== header; });
+  if (differs) sh.getRange(1, 1, 1, PARTUSAGE_OUTBOX_HEADERS.length).setValues([PARTUSAGE_OUTBOX_HEADERS]);
+  sh.setFrozenRows(1);
+  return sh;
+}
+
+function getPartUsageOutboxSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(PARTUSAGE_OUTBOX_SHEET);
+  if (!sh) sh = ss.insertSheet(PARTUSAGE_OUTBOX_SHEET);
+  return ensurePartUsageOutboxHeaders_(sh);
+}
+
+function normalizeUsageEventPayload_(params) {
+  var event = (params && (params.event || params.payload)) || params || {};
+  if (typeof event === 'string') event = JSON.parse(event);
+  if (!event || typeof event !== 'object') throw new Error('usage event required');
+  return event;
+}
+
+function existingPartUsageEventCount_(eventId) {
+  eventId = String(eventId || '').trim();
+  if (!eventId) return 0;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(PARTUSAGE_SHEET);
+  if (!sh || sh.getLastRow() < 2) return 0;
+  ensurePartUsageHeaders_(sh);
+  var eventCol = PARTUSAGE_HEADERS.indexOf('EventId');
+  var values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_HEADERS.length).getValues();
+  var count = 0;
+  values.forEach(function(row) {
+    if (String(row[eventCol] || '').trim() === eventId) count++;
+  });
+  return count;
+}
+
+function queuePartUsageEvent(params) {
+  var event = normalizeUsageEventPayload_(params);
+  var eventId = usageText_(event.eventId || '', 200).trim();
+  if (!eventId) throw new Error('eventId required');
+  if (existingPartUsageEventCount_(eventId)) {
+    return { success:true, onlineQueued:false, alreadyRecorded:true, eventId:eventId };
+  }
+  var sh = getPartUsageOutboxSheet_();
+  var payloadJson = JSON.stringify(event);
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    if (sh.getLastRow() >= 2) {
+      var values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_OUTBOX_HEADERS.length).getValues();
+      for (var i = 0; i < values.length; i++) {
+        if (String(values[i][1] || '').trim() === eventId && String(values[i][2] || '').trim() !== 'done') {
+          return { success:true, onlineQueued:true, idempotent:true, eventId:eventId, row:i + 2 };
+        }
+      }
+    }
+    sh.appendRow([
+      new Date(), eventId, 'queued',
+      usageText_(event.orderId || '', 200),
+      Number(event.expectedItems) || 0,
+      usageRecordedBy_(event.recordedBy || (params && params.recordedBy)),
+      usageText_((params && params.lastError) || '', 1000),
+      payloadJson,
+      ''
+    ]);
+    return { success:true, onlineQueued:true, eventId:eventId, row:sh.getLastRow() };
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
+}
+
 function usageRecordedBy_(value) {
   return usageText_(value, 150).trim() || '-';
 }
@@ -1490,7 +1574,7 @@ function usageComparable_(value) {
 function usageRowComparable_(row) {
   return [
     row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8],
-    row[9], row[10], row[11], row[12], row[15]
+    row[9], row[10], row[11], row[12], row[15], row[16]
   ].map(usageComparable_).join('\u001f');
 }
 
@@ -1585,7 +1669,8 @@ function recordPartUsage(params) {
         art, name,
         it.qty === '' || it.qty == null ? '' : usageText_(it.qty, 50),
         usageText_(it.unit || '', 50), usageText_(it.note || '', 2000), usageText_(it.setName || '', 250),
-        recordedBy, eventId, revision, action
+        recordedBy, eventId, revision, action,
+        imageUrlsField_(imageUrlList_(it && (it.imageURLs || it.imageUrls || it.images || it.imageURL || it.imageUrl)))
       ]);
     });
     const expectedItems = Number(params && params.expectedItems);
@@ -1609,6 +1694,38 @@ function recordPartUsage(params) {
   } finally {
     try { lock.releaseLock(); } catch (e) {}
   }
+}
+
+function replayPartUsageOutbox(params) {
+  var limit = Math.min(Math.max(1, Number((params && params.limit) || 50)), 200);
+  var sh = getPartUsageOutboxSheet_();
+  var summary = { success:true, total:0, replayed:0, written:0, failed:0, lastError:'' };
+  if (sh.getLastRow() < 2) return summary;
+  var rows = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_OUTBOX_HEADERS.length).getValues();
+  for (var i = 0; i < rows.length && summary.total < limit; i++) {
+    var row = rows[i];
+    var status = String(row[2] || '').trim();
+    if (status === 'done') continue;
+    summary.total++;
+    var rowNum = i + 2;
+    try {
+      var event = JSON.parse(String(row[7] || '{}'));
+      if (!event || !event.eventId) throw new Error('invalid queued payload');
+      var result = recordPartUsage(event);
+      sh.getRange(rowNum, 3, 1, 7).setValues([[
+        'done', row[3], row[4], row[5], '', row[7], new Date()
+      ]]);
+      summary.replayed++;
+      summary.written += Number(result && result.written) || 0;
+    } catch (err) {
+      var message = String((err && err.message) || err || '');
+      sh.getRange(rowNum, 3).setValue('error');
+      sh.getRange(rowNum, 7).setValue(usageText_(message, 1000));
+      summary.failed++;
+      summary.lastError = message;
+    }
+  }
+  return summary;
 }
 
 // Backfill the Article No onto ledger rows that were written BEFORE the code

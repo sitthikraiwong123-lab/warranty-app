@@ -13,7 +13,8 @@ test('buildUsageEvent snapshots every meaningful item, including codeless parts'
   const order = {
     id: 'order-1', type: 'Warranty', customer: 'WUS-TH',
     items: [
-      { articleNo:'A-1', description:'Pump', machineNo:'100', machineType:'MXY6', qty:2, qtyUnit:'pcs', itemDesc:'Leak', setName:'' },
+      { articleNo:'A-1', description:'Pump', machineNo:'100', machineType:'MXY6', qty:2, qtyUnit:'pcs', itemDesc:'Leak', setName:'',
+        photos:[{driveUrl:'https://drive.test/a.jpg'},{src:'https://drive.test/b.jpg'}] },
       { articleNo:'', description:'Unknown hose', machineNo:'101', machineType:'EXY6', qty:1, qtyUnit:'pcs', itemDesc:'Cracked', setName:'Kit' },
       { articleNo:'', description:'', machineNo:'102', machineType:'MXY6', qty:1 }
     ]
@@ -30,6 +31,7 @@ test('buildUsageEvent snapshots every meaningful item, including codeless parts'
   assert.deepEqual(event.items.map(item => [item.articleNo, item.partName]), [
     ['A-1', 'Pump'], ['', 'Unknown hose']
   ]);
+  assert.deepEqual(event.items[0].imageURLs, ['https://drive.test/a.jpg','https://drive.test/b.jpg']);
 
   order.items[0].description = 'Changed after snapshot';
   order.items.pop();
@@ -189,10 +191,21 @@ function loadBackendWithUsageSheet(initialRows) {
     ;globalThis.__usageApi={recordPartUsage,getAllPartUsage,getPartUsageEvent,apiInfo,PARTUSAGE_HEADERS,
       getPartUsage:typeof getPartUsage==='function'?getPartUsage:null,
       handleRequest:typeof handleRequest==='function'?handleRequest:null,
+      queuePartUsageEvent:typeof queuePartUsageEvent==='function'?queuePartUsageEvent:null,
+      replayPartUsageOutbox:typeof replayPartUsageOutbox==='function'?replayPartUsageOutbox:null,
+      outboxHeaders:typeof PARTUSAGE_OUTBOX_HEADERS==='undefined'?null:PARTUSAGE_OUTBOX_HEADERS,
       deleteRecoveredPartUsage:typeof deleteRecoveredPartUsage==='function'?deleteRecoveredPartUsage:null,
       recoverPartUsageDrafts:typeof recoverPartUsageDrafts==='function'?recoverPartUsageDrafts:null,
       recoveryHeaders:typeof PARTUSAGE_RECOVERY_HEADERS==='undefined'?null:PARTUSAGE_RECOVERY_HEADERS};`, context);
   return { usageSheet, sheets, api:context.__usageApi };
+}
+
+function apiHeaders() {
+  return [
+    'Timestamp','OrderId','Type','Customer','MachineNo','MachineType',
+    'ArticleNo','PartName','Qty','Unit','Note','SetName','RecordedBy',
+    'EventId','Revision','Action','ImageURLs'
+  ];
 }
 
 test('backend keeps every revision of the same order and retries are idempotent', () => {
@@ -203,7 +216,7 @@ test('backend keeps every revision of the same order and retries are idempotent'
   const { usageSheet, api } = loadBackendWithUsageSheet([legacyHeaders]);
   const base = { orderId:'order-9', type:'Warranty', customer:'WUS-TH', recordedBy:'Somchai' };
   const firstItems = [
-    {articleNo:'A',partName:'=IMPORTXML("https://example.invalid")',qty:1},
+    {articleNo:'A',partName:'=IMPORTXML("https://example.invalid")',qty:1,imageURLs:['https://drive.test/a.jpg','https://drive.test/b.jpg']},
     {articleNo:'B',partName:'Beta',qty:2},
     {articleNo:'',partName:'Codeless',qty:1}
   ];
@@ -213,6 +226,7 @@ test('backend keeps every revision of the same order and retries are idempotent'
   assert.equal(first.revision, 1);
   assert.equal(usageSheet.rows.length, 4);
   assert.deepEqual(Array.from(usageSheet.rows[0]), Array.from(api.PARTUSAGE_HEADERS));
+  assert.equal(usageSheet.rows[1][api.PARTUSAGE_HEADERS.indexOf('ImageURLs')], '["https://drive.test/a.jpg","https://drive.test/b.jpg"]');
 
   const second = api.recordPartUsage({...base,eventId:'evt-second',action:'pdf_preview',items:[firstItems[0]]});
   assert.equal(second.written, 1);
@@ -397,9 +411,9 @@ test('recovered draft usage is visible in history without mutating current PartU
   const headers = [
     'Timestamp','OrderId','Type','Customer','MachineNo','MachineType',
     'ArticleNo','PartName','Qty','Unit','Note','SetName','RecordedBy',
-    'EventId','Revision','Action'
+    'EventId','Revision','Action','ImageURLs'
   ];
-  const current = [new Date('2026-08-01T00:00:00Z'),'live-1','Warranty','WUS-TH','100','MXY-6','A','Alpha',1,'pcs','','','User','e1',1,'pdf_preview'];
+  const current = [new Date('2026-08-01T00:00:00Z'),'live-1','Warranty','WUS-TH','100','MXY-6','A','Alpha',1,'pcs','','','User','e1',1,'pdf_preview',''];
   const { usageSheet, api } = loadBackendWithUsageSheet([headers,current]);
   const before = usageSheet.rows.map(row=>[...row]);
   api.recoverPartUsageDrafts({drafts:[{
@@ -447,10 +461,44 @@ test('recovered draft usage is visible in history without mutating current PartU
     'recovered rows should not expose the normal PartUsage edit button');
 });
 
+test('online PartUsage outbox can be replayed by another device', () => {
+  const { usageSheet, sheets, api } = loadBackendWithUsageSheet([apiHeaders()]);
+  const event = {
+    orderId:'order-online-1', eventId:'evt-online-1', action:'save',
+    expectedItems:2, type:'Warranty', customer:'WUS-TH', recordedBy:'m',
+    items:[
+      {articleNo:'A',partName:'Alpha',qty:1,unit:'pcs',machineType:'MXY6'},
+      {articleNo:'B',partName:'Beta',qty:2,unit:'pcs',machineType:'EXY6'}
+    ]
+  };
+  assert.ok(api.queuePartUsageEvent, 'backend must expose queuePartUsageEvent');
+  assert.ok(api.replayPartUsageOutbox, 'backend must expose replayPartUsageOutbox');
+  assert.deepEqual(Array.from(api.outboxHeaders || []), [
+    'QueuedAt','EventId','Status','OrderId','ExpectedItems','RecordedBy','LastError','PayloadJson','ReplayedAt'
+  ]);
+
+  const queued = api.queuePartUsageEvent({ event, lastError:'timeout' });
+  assert.equal(queued.success, true);
+  assert.equal(queued.onlineQueued, true);
+  assert.equal(sheets.get('PartUsageOutbox').rows.length, 2, 'outbox sheet should keep the pending event online');
+  assert.equal(usageSheet.rows.length, 1, 'queueing online must not pretend the ledger row is already written');
+  const queuedAgain = api.queuePartUsageEvent({ event, lastError:'timeout again' });
+  assert.equal(queuedAgain.idempotent, true, 'same EventId must not duplicate the online queue');
+
+  const replayed = api.replayPartUsageOutbox({ limit:10 });
+  assert.equal(replayed.success, true);
+  assert.equal(replayed.replayed, 1);
+  assert.equal(replayed.written, 2);
+  assert.equal(usageSheet.rows.length, 3, 'replay should append one PartUsage row per item');
+  assert.equal(sheets.get('PartUsageOutbox').rows[1][2], 'done');
+  const replayedAgain = api.replayPartUsageOutbox({ limit:10 });
+  assert.equal(replayedAgain.replayed, 0, 'done outbox rows should not replay again');
+});
+
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.17"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.17'/);
-  assert.match(worker, /schmoll-export-v24/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.18"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.18'/);
+  assert.match(worker, /schmoll-export-v25/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -577,9 +625,9 @@ test('database, pending queue, log, and Excel export preserve multiple part phot
     'Excel export must accept multiple image groups per row');
   assert.match(html, /rowIndex,photoIndex/,
     'embedded XLSX media must keep each photo distinct inside a row');
-  assert.match(html, /const XLSX_IMAGE_COLUMN_WIDTH\s*=\s*180/,
+  assert.match(html, /const XLSX_IMAGE_COLUMN_WIDTH\s*=\s*260/,
     'Excel image exports should reserve a wider photo column for multi-photo rows');
-  assert.match(html, /const XLSX_IMAGE_SINGLE_ROW_HEIGHT\s*=\s*150/,
+  assert.match(html, /const XLSX_IMAGE_SINGLE_ROW_HEIGHT\s*=\s*220/,
     'Excel image exports should use taller rows so embedded photos are readable');
   assert.match(html, /slotW\s*=\s*multi\s*\?\s*Math\.floor\(imageColPx\s*\/\s*gridCols\)\s*:\s*imageColPx/,
     'Excel embedded photos should scale from the actual image column width, not a tiny fixed thumbnail');
@@ -591,6 +639,12 @@ test('database, pending queue, log, and Excel export preserve multiple part phot
     'setImageURL should append new Drive URLs instead of replacing previous photos');
   assert.match(backendSource, /PENDINGPARTS_HEADERS[\s\S]*'ImageURLs'/,
     'pending parts queue must store multiple image URLs too');
+  assert.match(backendSource, /PARTUSAGE_HEADERS[\s\S]*'ImageURLs'/,
+    'PartUsage log rows must store image snapshots instead of relying on later DB lookup guesses');
+  assert.match(html, /function usageOrderSnapshotForLog\(sourceOrder\)/,
+    'usage events should snapshot the photo URLs currently attached to each order item');
+  assert.match(html, /if\(!isLegacy\) return \[\]/,
+    'new log rows without ImageURLs must not guess by part name and show unrelated photos');
 });
 
 test('pending DB queue can add multiple photos at once', () => {
@@ -685,6 +739,37 @@ test('database and pending queues can filter/export parts by machine model usage
     'pending rows should be filtered before rendering so users can isolate one machine model');
   assert.match(html, /if\(tab==='parts' \|\| tab==='pending'\)/,
     'changing the machine-model filter should refresh the parts export batch count for parts and pending views');
+  assert.match(html, /function filterTerms\(query\)/,
+    'DB search must support several selected filters at once instead of replacing the previous chip');
+  assert.match(html, /function toggleFilterTerm\(current,\s*term\)/,
+    'clicking a chip/dropdown value should add or remove that one filter term');
+  assert.match(html, /qTerms\.every\(w=>hay\.includes\(w\)\)/,
+    'multi-filter matching should narrow results with AND semantics');
+  assert.match(html, /const activeTerms\s*=\s*filterTerms\(inp\.value\)/,
+    'chip rendering should derive the currently selected multi-filter terms once');
+  assert.match(html, /chipRow\.querySelectorAll\('\.cbx-chip'\)[\s\S]{0,220}activeTerms\.includes\(c\.dataset\.val\.toLowerCase\(\)\)/,
+    'several quick chips can stay active at the same time');
+  assert.match(html, /o\.onmousedown[\s\S]{0,120}toggleFilterTerm\(inp\.value,\s*v\)/,
+    'dropdown picks should append to the current filter instead of replacing it');
+  assert.match(html, /class="part-machine-used"/,
+    'part cards should briefly show which machine models the part has been used with');
+  assert.match(html, /รุ่นที่เคยใช้/,
+    'machine usage text should be explicit enough for future part compatibility work');
+});
+
+test('DB and pending photo lists can choose the primary image', () => {
+  assert.match(html, /function moveImageUrlFirst\(urls,\s*index\)/,
+    'choosing a primary image should move that URL to the front of ImageURLs');
+  assert.match(html, /class="epm-img-main/,
+    'part editor image tiles need a primary-image button');
+  assert.match(html, /imageUrls\s*=\s*moveImageUrlFirst\(imageUrls,\s*i\)/,
+    'part editor primary selection should reorder existing DB image URLs');
+  assert.match(html, /pendingImages\s*=\s*moveImageUrlFirst\(pendingImages,\s*i\)/,
+    'part editor primary selection should reorder newly-added images before upload');
+  assert.match(html, /class="rp-img-main/,
+    'pending DB resolver should expose a primary-image button too');
+  assert.match(html, /imageUrls\s*=\s*moveImageUrlFirst\(imageUrls,\s*i\)[\s\S]{0,220}applyImageUrlsToRecord\(row,\s*imageUrls\)/,
+    'pending primary selection should update the cached row so preview/export uses the chosen main image');
 });
 
 test('queued usage logs retry automatically without relying on an end-user button', () => {
@@ -704,6 +789,16 @@ test('queued usage logs retry automatically without relying on an end-user butto
     'automatic replay must only operate on queued usage events');
   assert.match(html, /outboxAdd\(\{action:'recordPartUsage'[\s\S]{0,500}scheduleUsageOutboxRetry\(\)/,
     'a newly queued usage event must schedule its own retry');
+  assert.match(backendSource, /const PARTUSAGE_OUTBOX_SHEET\s*=\s*'PartUsageOutbox'/,
+    'usage events that cannot reach PartUsage should have an online queue sheet');
+  assert.match(backendSource, /case 'queuePartUsageEvent'/,
+    'Apps Script must expose a durable online usage queue endpoint');
+  assert.match(backendSource, /case 'replayPartUsageOutbox'/,
+    'any device should be able to replay the online usage queue');
+  assert.match(html, /async function queueUsageEventOnline\(event,\s*error\)/,
+    'frontend failed usage events should try to land in the online outbox before falling back to local-only storage');
+  assert.match(html, /lookupApiCall\('replayPartUsageOutbox'/,
+    'manual and automatic Log sync should replay the shared online queue');
   assert.match(html, /document\.addEventListener\('visibilitychange'[\s\S]{0,300}flushUsageOutboxAutomatically\(\)/,
     'returning to the app must retry queued usage immediately');
   assert.match(html, /window\.addEventListener\('focus'[\s\S]{0,250}flushUsageOutboxAutomatically\(\)/,
@@ -712,4 +807,8 @@ test('queued usage logs retry automatically without relying on an end-user butto
     'network reconnection must run the startup sync pipeline');
   assert.match(html, /isPowerUser\(\)\?'<button type="button" class="btn log-sync-pending"/,
     'the manual diagnostic control must not be required or shown to ordinary users');
+  assert.match(html, /class="epm-actions log-actions sticky-log-actions"/,
+    'the Log export/action footer should stay visible while the Log rows scroll');
+  assert.match(html, /\.sticky-log-actions\{[\s\S]{0,160}position:sticky[\s\S]{0,160}bottom:0/,
+    'the sticky footer should be pinned to the bottom of the modal, not just the Excel file header');
 });
