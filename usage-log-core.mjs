@@ -55,6 +55,42 @@ export function buildUsageEvent(order, options = {}) {
   };
 }
 
+export function buildDraftRecoveryBatch(drafts, options = {}) {
+  if (!Array.isArray(drafts)) throw new Error('Drafts must be an array');
+  if (drafts.length > 10) throw new Error('Draft recovery is limited to 10 drafts');
+  const recordedBy = text(options.recordedBy || '(unknown)').trim() || '(unknown)';
+  return {
+    drafts: drafts
+      .filter(draft => draft && text(draft.id).trim())
+      .map(draft => {
+        const sourceItems = Array.isArray(draft.items) ? draft.items : [];
+        if (sourceItems.length > 8) throw new Error('Draft recovery is limited to 8 items per draft');
+        const items = sourceItems
+          .filter(item => item && (text(item.articleNo).trim() || text(item.description).trim()))
+          .map(item => ({
+            articleNo:text(item.articleNo).trim(),
+            partName:text(item.description),
+            machineNo:text(item.machineNo),
+            machineType:text(item.machineType),
+            qty:item.qty === '' || item.qty == null ? '' : item.qty,
+            unit:text(item.qtyUnit),
+            note:text(item.itemDesc),
+            setName:text(item.setName)
+          }));
+        return {
+          orderId:text(draft.id).trim(),
+          createdAt:Number(draft.createdAt) || 0,
+          updatedAt:Number(draft.updatedAt) || 0,
+          type:text(draft.type),
+          customer:text(draft.customer),
+          recordedBy,
+          items
+        };
+      })
+      .filter(draft => draft.items.length > 0)
+  };
+}
+
 export function validateUsageAck(response, event) {
   if (!event || !event.eventId) throw new Error('Usage event required');
   const expectedItems = Number(event.expectedItems) || 0;
@@ -87,6 +123,7 @@ globalThis.UsageLogCore = Object.freeze({
   USAGE_ACTIONS,
   createUsageEventId,
   buildUsageEvent,
+  buildDraftRecoveryBatch,
   validateUsageAck,
   usageStatusSuffix
 });
