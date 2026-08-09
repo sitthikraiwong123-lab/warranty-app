@@ -45,7 +45,11 @@ test('usage acknowledgements must prove that every item was durably accepted', a
     state:'saved', eventId:'evt-2', written:3, expectedItems:3, revision:4
   });
   assert.deepEqual(validateUsageAck({queued:true,eventId:'evt-2'}, event), {
-    state:'queued', eventId:'evt-2', written:0, expectedItems:3, revision:null
+    state:'queued', eventId:'evt-2', written:0, expectedItems:3, revision:null, error:''
+  });
+  assert.deepEqual(validateUsageAck({queued:true,eventId:'evt-2',error:'Unknown action: recordPartUsage'}, event), {
+    state:'queued', eventId:'evt-2', written:0, expectedItems:3, revision:null,
+    error:'Unknown action: recordPartUsage'
   });
   assert.throws(() => validateUsageAck({success:true,eventId:'evt-2',written:2}, event), /2\/3/);
   assert.throws(() => validateUsageAck({success:true,eventId:'wrong',written:3}, event), /event/i);
@@ -70,7 +74,7 @@ test('usage core rejects invalid events and reports saved, queued, failed, and e
   });
 
   assert.equal(core.usageStatusSuffix(null), '');
-  assert.match(core.usageStatusSuffix({state:'queued',expectedItems:2}), /รอซิงค์/);
+  assert.match(core.usageStatusSuffix({state:'queued',expectedItems:2,error:'backend outdated'}), /backend outdated/);
   assert.match(core.usageStatusSuffix({state:'saved',written:2,expectedItems:2}), /2\/2/);
 
   const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
@@ -84,7 +88,7 @@ test('usage core rejects invalid events and reports saved, queued, failed, and e
 });
 
 test('draft recovery snapshots only meaningful items without changing the drafts', async () => {
-  const { buildDraftRecoveryBatch } = await import('../usage-log-core.mjs');
+  const { buildDraftRecoveryBatch, buildDraftRecoveryBatches } = await import('../usage-log-core.mjs');
   const drafts = [{
     id:'draft-1', createdAt:10, updatedAt:20, type:'Warranty', customer:'WUS-TH',
     items:[
@@ -110,6 +114,14 @@ test('draft recovery snapshots only meaningful items without changing the drafts
   assert.throws(() => buildDraftRecoveryBatch(null), /array/);
   assert.throws(() => buildDraftRecoveryBatch(Array.from({length:11},(_,i)=>({id:'d'+i,items:[]}))), /10/);
   assert.throws(() => buildDraftRecoveryBatch([{id:'too-many',items:Array.from({length:9},()=>({description:'Part'}))}]), /8/);
+
+  const manyDrafts = Array.from({length:23}, (_, index) => ({
+    id:'draft-'+index, items:[{description:'Part '+index,qty:1}]
+  }));
+  const batches = buildDraftRecoveryBatches(manyDrafts, {recordedBy:'Somchai'});
+  assert.deepEqual(batches.map(batch => batch.drafts.length), [10,10,3]);
+  assert.equal(batches.flatMap(batch => batch.drafts).length, 23);
+  assert.equal(manyDrafts[0].items[0].description, 'Part 0', 'batching must not mutate local drafts');
 });
 
 class FakeRange {
@@ -174,7 +186,7 @@ function loadBackendWithUsageSheet(initialRows) {
     PropertiesService: { getScriptProperties: () => ({getProperty(){return null;},setProperty(){}}) }
   });
   vm.runInContext(backendSource + `
-    ;globalThis.__usageApi={recordPartUsage,getAllPartUsage,PARTUSAGE_HEADERS,
+    ;globalThis.__usageApi={recordPartUsage,getAllPartUsage,getPartUsageEvent,apiInfo,PARTUSAGE_HEADERS,
       recoverPartUsageDrafts:typeof recoverPartUsageDrafts==='function'?recoverPartUsageDrafts:null,
       recoveryHeaders:typeof PARTUSAGE_RECOVERY_HEADERS==='undefined'?null:PARTUSAGE_RECOVERY_HEADERS};`, context);
   return { usageSheet, sheets, api:context.__usageApi };
@@ -227,6 +239,11 @@ test('backend keeps every revision of the same order and retries are idempotent'
   assert.equal(newest.EventId, 'evt-second');
   assert.equal(newest.Revision, 2);
   assert.equal(newest.Action, 'pdf_preview');
+  const confirmed = api.getPartUsageEvent({eventId:'evt-first',expectedItems:3});
+  assert.equal(confirmed.success, true);
+  assert.equal(confirmed.written, 3);
+  assert.equal(confirmed.eventId, 'evt-first');
+  assert.equal(api.apiInfo().usageLogVersion, 3);
 });
 
 test('backend validates action and caps a single usage event', () => {
@@ -280,9 +297,9 @@ test('draft recovery writes only missing rows to a separate idempotent sheet', (
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs'/);
-  assert.match(worker, /schmoll-export-v9/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.3"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.3'/);
+  assert.match(worker, /schmoll-export-v10/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -304,6 +321,11 @@ test('every user-visible order action is wired to an append-only usage event', (
   assert.doesNotMatch(backendSource, /function recordPartUsageLegacy_/,
     'the destructive OrderId replacement implementation must not remain callable');
   assert.match(backendSource, /case 'recoverPartUsageDrafts'/);
+  assert.match(backendSource, /case 'getPartUsageEvent'/);
+  assert.match(backendSource, /case 'apiInfo'/);
   assert.match(html, /recoverPartUsageDrafts/);
+  assert.match(html, /buildDraftRecoveryBatches/);
+  assert.match(html, /ซิงค์ Log ที่รอ/);
+  assert.match(html, /usageLogVersion/);
   assert.match(html, /PartUsageRecovery/);
 });

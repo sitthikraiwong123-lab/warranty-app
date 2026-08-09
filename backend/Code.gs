@@ -90,6 +90,7 @@ function handleRequest(e) {
       case 'recordPartUsage':    result = recordPartUsage(params); break;
       case 'getPartUsage':       result = getPartUsage(params); break;
       case 'getAllPartUsage':    result = getAllPartUsage(params); break;
+      case 'getPartUsageEvent':  result = getPartUsageEvent(params); break;
       case 'recoverPartUsageDrafts': result = recoverPartUsageDrafts(params); break;
       case 'deletePartUsage':    result = deletePartUsage(params); break;
       case 'updatePartUsage':    result = updatePartUsage(params); break;
@@ -106,7 +107,8 @@ function handleRequest(e) {
       case 'getAppSettings':     result = getAppSettings(); break;
       case 'setAppSettings':     result = setAppSettings(params); break;
       case 'reserveExportNumber':result = reserveExportNumber(params); break;
-      case 'ping':          result = { success: true, time: Date.now() }; break;
+      case 'apiInfo':       result = apiInfo(); break;
+      case 'ping':          result = Object.assign(apiInfo(), { time: Date.now() }); break;
       case 'debugHeaders':  result = debugHeaders(); break;
       default:              result = { success: false, error: 'Unknown action: ' + params.action };
     }
@@ -1343,6 +1345,15 @@ function usageText_(value, maxLength) {
   return out;
 }
 
+function apiInfo() {
+  return {
+    success: true,
+    appVersion: '2.12.3',
+    usageLogVersion: 3,
+    usageCapabilities: ['append-events', 'idempotent-event-id', 'confirm-event', 'draft-recovery']
+  };
+}
+
 function ensurePartUsageHeaders_(sh) {
   if (sh.getLastRow() < 1) {
     sh.appendRow(PARTUSAGE_HEADERS);
@@ -1532,6 +1543,36 @@ function getAllPartUsage(params) {
     out.push(o);
   }
   return { success: true, rows: out };
+}
+
+// Read-after-write confirmation for a request whose HTTP acknowledgement was
+// interrupted. This is intentionally read-only: it lets the client prove that
+// all rows landed before removing an EventId from its durable outbox.
+function getPartUsageEvent(params) {
+  var eventId = usageText_((params && params.eventId) || '', 200).trim();
+  if (!eventId) throw new Error('eventId required');
+  var expectedItems = Number(params && params.expectedItems);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTUSAGE_SHEET);
+  if (!sh || sh.getLastRow() < 2) {
+    return { success:true, found:false, eventId:eventId, written:0, revision:null };
+  }
+  var eventColumn = PARTUSAGE_HEADERS.indexOf('EventId');
+  var revisionColumn = PARTUSAGE_HEADERS.indexOf('Revision');
+  var values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_HEADERS.length).getValues();
+  var written = 0;
+  var revision = 0;
+  values.forEach(function(row) {
+    if (String(row[eventColumn] || '').trim() !== eventId) return;
+    written++;
+    revision = Math.max(revision, Number(row[revisionColumn]) || 0);
+  });
+  return {
+    success:true,
+    found:written > 0 && (!isFinite(expectedItems) || expectedItems < 0 || written === expectedItems),
+    eventId:eventId,
+    written:written,
+    revision:revision || null
+  };
 }
 
 // ============================================================
