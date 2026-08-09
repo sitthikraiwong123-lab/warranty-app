@@ -496,9 +496,9 @@ test('online PartUsage outbox can be replayed by another device', () => {
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.22"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.22'/);
-  assert.match(worker, /schmoll-export-v29/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.23"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.23'/);
+  assert.match(worker, /schmoll-export-v30/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -594,6 +594,10 @@ test('database, pending queue, log, and Excel export preserve multiple part phot
   assert.ok(
     html.indexOf('function imageUrlList(source)') < html.indexOf("document.addEventListener('DOMContentLoaded'"),
     'imageUrlList must be global, not scoped inside a modal boot block, because combo/log/save code calls it later'
+  );
+  assert.ok(
+    html.indexOf('function imageUrlList(source)') < html.indexOf('function itemUsagePhotoUrls(it)'),
+    'usage log snapshotting calls imageUrlList before the later app boot script runs, so the helper must live in the same earlier script block'
   );
   assert.match(html, /function imageStripHtml\(source/,
     'database and pending cards should render multiple thumbnails, not only the first image');
