@@ -187,6 +187,7 @@ function loadBackendWithUsageSheet(initialRows) {
   });
   vm.runInContext(backendSource + `
     ;globalThis.__usageApi={recordPartUsage,getAllPartUsage,getPartUsageEvent,apiInfo,PARTUSAGE_HEADERS,
+      handleRequest:typeof handleRequest==='function'?handleRequest:null,
       recoverPartUsageDrafts:typeof recoverPartUsageDrafts==='function'?recoverPartUsageDrafts:null,
       recoveryHeaders:typeof PARTUSAGE_RECOVERY_HEADERS==='undefined'?null:PARTUSAGE_RECOVERY_HEADERS};`, context);
   return { usageSheet, sheets, api:context.__usageApi };
@@ -256,6 +257,54 @@ test('backend validates action and caps a single usage event', () => {
   assert.throws(() => api.recordPartUsage({orderId:'x',eventId:'e',action:'save',items:Array.from({length:201},()=>({partName:'A'}))}), /200/);
 });
 
+test('usage API routing preserves the user action instead of sending it as the endpoint action', () => {
+  const headers = [
+    'Timestamp','OrderId','Type','Customer','MachineNo','MachineType',
+    'ArticleNo','PartName','Qty','Unit','Note','SetName','RecordedBy',
+    'EventId','Revision','Action'
+  ];
+  const { usageSheet, api } = loadBackendWithUsageSheet([headers]);
+  const result = api.recordPartUsage({
+    orderId:'order-route',
+    eventId:'evt-route',
+    action:'recordPartUsage',
+    usageAction:'pdf_preview',
+    expectedItems:1,
+    items:[{articleNo:'63598',partName:'LASER DLS5'}]
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.written, 1);
+  assert.equal(usageSheet.rows[1][headers.indexOf('Action')], 'pdf_preview');
+  assert.match(html, /body\.usageAction\s*=\s*body\.action/,
+    'recordPartUsage payloads must move event.action out of the API routing field');
+  assert.match(html, /body\.action\s*=\s*action/,
+    'the backend endpoint action must win after the payload is copied');
+});
+
+test('backend accepts queued v2.12.4 usage events whose action reached the router directly', () => {
+  const headers = [
+    'Timestamp','OrderId','Type','Customer','MachineNo','MachineType',
+    'ArticleNo','PartName','Qty','Unit','Note','SetName','RecordedBy',
+    'EventId','Revision','Action'
+  ];
+  const { usageSheet, api } = loadBackendWithUsageSheet([headers]);
+  const responseText = api.handleRequest({postData:{contents:JSON.stringify({
+    action:'pdf_preview',
+    orderId:'order-legacy-router',
+    eventId:'evt-legacy-router',
+    expectedItems:1,
+    items:[{articleNo:'63598',partName:'LASER DLS5'}]
+  })}});
+  const response = JSON.parse(responseText);
+
+  assert.equal(response.success, true);
+  assert.equal(response.written, 1);
+  assert.equal(usageSheet.rows[1][headers.indexOf('Action')], 'pdf_preview');
+  assert.match(backendSource, /case 'pdf_preview':[\s\S]{0,500}recordPartUsage\(params\)/,
+    'backend must drain old queued events that were routed with the user action name');
+});
+
 test('draft recovery writes only missing rows to a separate idempotent sheet', () => {
   const headers = [
     'Timestamp','OrderId','Type','Customer','MachineNo','MachineType',
@@ -297,9 +346,9 @@ test('draft recovery writes only missing rows to a separate idempotent sheet', (
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.4"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.4'/);
-  assert.match(worker, /schmoll-export-v11/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.5"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.5'/);
+  assert.match(worker, /schmoll-export-v12/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
