@@ -16,6 +16,10 @@ function text(value) {
   return String(value == null ? '' : value);
 }
 
+function recordedByText(value) {
+  return text(value).trim() || '-';
+}
+
 export function createUsageEventId() {
   const cryptoObject = globalThis.crypto;
   if (cryptoObject && typeof cryptoObject.randomUUID === 'function') {
@@ -49,7 +53,7 @@ export function buildUsageEvent(order, options = {}) {
     eventCreatedAt: text(options.createdAt || new Date().toISOString()),
     type: text(order.type),
     customer: text(order.customer),
-    recordedBy: text(options.recordedBy || '(unknown)').trim() || '(unknown)',
+    recordedBy: recordedByText(options.recordedBy),
     expectedItems: items.length,
     items
   };
@@ -58,7 +62,7 @@ export function buildUsageEvent(order, options = {}) {
 export function buildDraftRecoveryBatch(drafts, options = {}) {
   if (!Array.isArray(drafts)) throw new Error('Drafts must be an array');
   if (drafts.length > 10) throw new Error('Draft recovery is limited to 10 drafts');
-  const recordedBy = text(options.recordedBy || '(unknown)').trim() || '(unknown)';
+  const recordedBy = recordedByText(options.recordedBy);
   return {
     drafts: drafts
       .filter(draft => draft && text(draft.id).trim())
