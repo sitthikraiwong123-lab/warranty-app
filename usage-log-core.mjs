@@ -156,7 +156,10 @@ export function validateUsageAck(response, event) {
 
 export function usageStatusSuffix(result) {
   if (!result) return '';
-  if (result.state === 'failed') return ' · ⚠ Log ยังไม่ถูกบันทึก';
+  if (result.state === 'failed') {
+    const error = text(result.error).trim();
+    return ' · ⚠ Log ยังไม่ถูกบันทึก' + (error ? ' — ' + error.slice(0, 160) : '');
+  }
   return result.state === 'queued'
     ? ' · Log รอซิงค์ (' + result.expectedItems + ' รายการ)' +
       (result.error ? ' — ' + text(result.error).slice(0, 160) : '')

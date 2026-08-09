@@ -496,9 +496,9 @@ test('online PartUsage outbox can be replayed by another device', () => {
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.18"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.18'/);
-  assert.match(worker, /schmoll-export-v25/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.19"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.19'/);
+  assert.match(worker, /schmoll-export-v26/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -643,8 +643,14 @@ test('database, pending queue, log, and Excel export preserve multiple part phot
     'PartUsage log rows must store image snapshots instead of relying on later DB lookup guesses');
   assert.match(html, /function usageOrderSnapshotForLog\(sourceOrder\)/,
     'usage events should snapshot the photo URLs currently attached to each order item');
-  assert.match(html, /if\(!isLegacy\) return \[\]/,
-    'new log rows without ImageURLs must not guess by part name and show unrelated photos');
+  assert.match(html, /const direct\s*=\s*imageUrlList\(row\);\s*if\(direct\.length\) return direct;/,
+    'new log rows with ImageURLs must prefer the immutable snapshot saved with the log row');
+  assert.match(html, /function uniqueUsageFallbackImageMatch\(rows,\s*predicate\)/,
+    'older log rows without ImageURLs still need a guarded fallback image resolver');
+  assert.match(html, /matches\.length\s*===\s*1\s*\?\s*matches\[0\]\.urls\s*:\s*\[\]/,
+    'fallback by part name must only be used when it resolves to one unambiguous photo source');
+  assert.match(html, /rowMachineCustomerMatches\(row,\s*p\)/,
+    'pending-queue fallback should use machine/customer context to avoid borrowing photos from another order');
 });
 
 test('pending DB queue can add multiple photos at once', () => {
@@ -789,6 +795,10 @@ test('queued usage logs retry automatically without relying on an end-user butto
     'automatic replay must only operate on queued usage events');
   assert.match(html, /outboxAdd\(\{action:'recordPartUsage'[\s\S]{0,500}scheduleUsageOutboxRetry\(\)/,
     'a newly queued usage event must schedule its own retry');
+  assert.match(html, /emergencyUsageOutboxAdd\(\{action:'recordPartUsage'/,
+    'if IndexedDB/localStorage queueing fails mid-export, usage events need a final emergency copy instead of being reported as lost');
+  assert.match(html, /state:'queued'[\s\S]{0,180}emergencyQueued:true/,
+    'an emergency local copy should still be shown to the user as queued, not as permanently unsaved');
   assert.match(backendSource, /const PARTUSAGE_OUTBOX_SHEET\s*=\s*'PartUsageOutbox'/,
     'usage events that cannot reach PartUsage should have an online queue sheet');
   assert.match(backendSource, /case 'queuePartUsageEvent'/,
