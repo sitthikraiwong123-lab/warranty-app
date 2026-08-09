@@ -264,6 +264,68 @@ function findColIdx(headers, name) {
   return -1;
 }
 
+function ensureColumn_(sheet, headers, name) {
+  var idx = findColIdx(headers, name);
+  if (idx !== -1) return idx;
+  idx = headers.length;
+  sheet.getRange(1, idx + 1).setValue(name);
+  headers.push(name);
+  return idx;
+}
+
+function imageUrlList_(value) {
+  var out = [];
+  function add(v) {
+    if (v == null) return;
+    if (Array.isArray(v)) { v.forEach(add); return; }
+    var s = String(v).trim();
+    if (!s) return;
+    if ((s.charAt(0) === '[' || s.charAt(0) === '{') && s.length > 1) {
+      try {
+        var parsed = JSON.parse(s);
+        if (Array.isArray(parsed)) { parsed.forEach(add); return; }
+        if (parsed && typeof parsed === 'object') { add(parsed.url || parsed.ImageURL || parsed.imageURL); return; }
+      } catch (e) {}
+    }
+    s.split(/[\n\r|]+/).forEach(function (part) {
+      part = String(part || '').trim();
+      if (!part) return;
+      var key = part.toLowerCase();
+      for (var i = 0; i < out.length; i++) {
+        if (String(out[i]).toLowerCase() === key) return;
+      }
+      out.push(part);
+    });
+  }
+  add(value);
+  return out;
+}
+
+function imageUrlsField_(urls) {
+  var list = imageUrlList_(urls);
+  return list.length ? JSON.stringify(list) : '';
+}
+
+function mergeImageUrls_(existing, incoming) {
+  return imageUrlList_(existing).concat(imageUrlList_(incoming)).reduce(function (acc, url) {
+    var key = String(url || '').toLowerCase();
+    if (url && !acc.some(function (x) { return String(x).toLowerCase() === key; })) acc.push(url);
+    return acc;
+  }, []);
+}
+
+function appendImageUrlsToPart_(sheet, headers, rowNum, incomingUrls) {
+  var imageUrlColIdx = ensureColumn_(sheet, headers, 'ImageURL');
+  var imageUrlsColIdx = ensureColumn_(sheet, headers, 'ImageURLs');
+  var currentFirst = String(sheet.getRange(rowNum, imageUrlColIdx + 1).getValue() || '');
+  var currentMany = String(sheet.getRange(rowNum, imageUrlsColIdx + 1).getValue() || '');
+  var merged = mergeImageUrls_(mergeImageUrls_(currentMany, currentFirst), incomingUrls);
+  sheet.getRange(rowNum, imageUrlColIdx + 1).setValue(merged[0] || '');
+  sheet.getRange(rowNum, imageUrlsColIdx + 1).setValue(imageUrlsField_(merged));
+  merged.forEach(function (url) { ensureImageShared_(url); });
+  return merged;
+}
+
 function sheetToObjects(name, headerMap) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
   if (!sheet) return [];
@@ -524,8 +586,18 @@ function findCodelessRowMatching(data, articleNoColIdx, descColIdx, aliasCols, t
 
 function recordNewPart(params, target) {
   const sheet = getSheet(target.name);
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
+  let data = sheet.getDataRange().getValues();
+  let headers = data[0];
+  const recordData = params.data || {};
+  const incomingImageUrls = imageUrlList_(recordData.ImageURLs).concat(imageUrlList_(recordData.imageURLs)).concat(imageUrlList_(recordData.ImageURL));
+  if (incomingImageUrls.length) {
+    recordData.ImageURL = incomingImageUrls[0] || '';
+    recordData.ImageURLs = imageUrlsField_(incomingImageUrls);
+    ensureColumn_(sheet, headers, 'ImageURL');
+    ensureColumn_(sheet, headers, 'ImageURLs');
+    data = sheet.getDataRange().getValues();
+    headers = data[0];
+  }
 
   let realArticleNoHeader = 'ArticleNo';
   Object.keys(target.map).forEach(rh => { if (target.map[rh] === 'ArticleNo') realArticleNoHeader = rh; });
@@ -533,8 +605,8 @@ function recordNewPart(params, target) {
   const descColIdx = findColIdx(headers, "Description");
   const aliasCols = findAliasColumnIndexes(headers);
 
-  const newArticleNo = String((params.data || {}).ArticleNo || '').trim();
-  const newDesc = String((params.data || {}).Description || '').trim();
+  const newArticleNo = String(recordData.ArticleNo || '').trim();
+  const newDesc = String(recordData.Description || '').trim();
 
   // ----- No Article No given: codeless entry (name known, code not known yet) -----
   if (!newArticleNo) {
@@ -542,7 +614,7 @@ function recordNewPart(params, target) {
     if (wasRecentlyDeleted('Part', newDesc)) return { success: true, action: 'blocked_recently_deleted' };
     const dup = findCodelessRowMatching(data, articleNoColIdx, descColIdx, aliasCols, newDesc, -1);
     if (dup !== -1) return { success: true, action: 'duplicate_noop' };
-    appendDirectToMaster(target.name, target.map, params.data || {});
+    appendDirectToMaster(target.name, target.map, recordData);
     return { success: true, action: 'inserted_codeless' };
   }
 
@@ -557,9 +629,10 @@ function recordNewPart(params, target) {
     const codelessRow = findCodelessRowMatching(data, articleNoColIdx, descColIdx, aliasCols, newDesc, -1);
     if (codelessRow !== -1) {
       sheet.getRange(codelessRow + 1, articleNoColIdx + 1).setValue(newArticleNo);
+      if (incomingImageUrls.length) appendImageUrlsToPart_(sheet, headers, codelessRow + 1, incomingImageUrls);
       return { success: true, action: 'graduated_codeless' };
     }
-    appendDirectToMaster(target.name, target.map, params.data || {});
+    appendDirectToMaster(target.name, target.map, recordData);
     return { success: true, action: 'inserted' };
   }
 
@@ -590,6 +663,11 @@ function recordNewPart(params, target) {
   // (matches the Description we just confirmed belongs under this Article No),
   // fold it in - it's now redundant.
   const orphan = findCodelessRowMatching(data, articleNoColIdx, descColIdx, aliasCols, newDesc, existingRow);
+  if (incomingImageUrls.length) {
+    appendImageUrlsToPart_(sheet, headers, existingRow + 1, incomingImageUrls);
+    resultAction += '+image_urls_appended';
+  }
+
   if (orphan !== -1) {
     sheet.deleteRow(orphan + 1);
     resultAction += '+merged_codeless_deleted';
@@ -677,7 +755,8 @@ function shareFileAnyone_(file) {
 function setImageURL(params) {
   const articleNo = String(params.articleNo || '').trim();
   const url = String(params.url || '').trim();
-  if (!articleNo || !url) throw new Error('articleNo and url are required');
+  const urls = imageUrlList_(params.imageURLs).concat(imageUrlList_(params.urls)).concat(imageUrlList_(url));
+  if (!articleNo || !urls.length) throw new Error('articleNo and url are required');
 
   const sheet = getSheet(SHEETS.PARTS);
   const data = sheet.getDataRange().getValues();
@@ -687,24 +766,15 @@ function setImageURL(params) {
   Object.keys(PART_HEADER_MAP).forEach(rh => { if (PART_HEADER_MAP[rh] === 'ArticleNo') realArticleNoHeader = rh; });
   const articleNoColIdx = findColIdx(headers, realArticleNoHeader);
 
-  // Auto-create the ImageURL column if the sheet doesn't have one yet, so the
-  // first-ever image attach (e.g. from the Add-Spare-Part form) doesn't fail.
-  // This mirrors updatePart(), which also creates the column on demand.
-  let imageUrlColIdx = findColIdx(headers, 'ImageURL');
-  if (imageUrlColIdx === -1) {
-    imageUrlColIdx = headers.length;
-    sheet.getRange(1, imageUrlColIdx + 1).setValue('ImageURL');
-  }
   const lastModColIdx = findColIdx(headers, 'LastModified');
 
   const keyLower = articleNo.toLowerCase();
   for (let r = 1; r < data.length; r++) {
     if (String(data[r][articleNoColIdx]).trim().toLowerCase() !== keyLower) continue;
-    sheet.getRange(r + 1, imageUrlColIdx + 1).setValue(url);
-    ensureImageShared_(url);                     // make it viewable in <img> tags
+    const merged = appendImageUrlsToPart_(sheet, headers, r + 1, urls);
     // Bump LastModified so the next deltaSync re-emits this row with its image.
     if (lastModColIdx !== -1) sheet.getRange(r + 1, lastModColIdx + 1).setValue(new Date());
-    return { success: true, updated: true, row: r + 1 };
+    return { success: true, updated: true, row: r + 1, imageURL: merged[0] || '', imageURLs: merged };
   }
   return { success: true, updated: false, message: 'ArticleNo not found in sheet' };
 }
@@ -1029,10 +1099,15 @@ function updatePart(params) {
 
   // ----- back up BEFORE changing -----
   const imgHeader = info.imageCol >= 0 ? String(info.headers[info.imageCol]).trim() : null;
+  const imgsCol = findColIdx(info.headers, 'ImageURLs');
+  const imgsHeader = imgsCol >= 0 ? String(info.headers[imgsCol]).trim() : null;
   const newDataPreview = {
     ArticleNo: newArticleNo,
     Description: (params.newDescription !== undefined) ? String(params.newDescription) : oldData['Description'],
     ImageURL: (params.imageURL !== undefined) ? String(params.imageURL) : (imgHeader ? oldData[imgHeader] : ''),
+    ImageURLs: (params.imageURLs !== undefined)
+      ? imageUrlsField_(params.imageURLs)
+      : ((params.imageURL !== undefined) ? imageUrlsField_(params.imageURL) : (imgsHeader ? oldData[imgsHeader] : '')),
     aliases: (params.aliases !== undefined) ? params.aliases : undefined
   };
   getEditLogSheet_().appendRow([new Date(), editor, 'update', origArticleNo, newArticleNo, JSON.stringify(oldData), JSON.stringify(newDataPreview)]);
@@ -1044,13 +1119,17 @@ function updatePart(params) {
   if (params.imageURL !== undefined) {
     const oldImageUrl = imgHeader ? String(oldData[imgHeader] || '') : '';
     const newImageUrl = String(params.imageURL);
+    const newImageUrls = imageUrlList_(params.imageURLs).concat(imageUrlList_(newImageUrl));
     let imgCol = info.imageCol;
     if (imgCol < 0) { imgCol = info.headers.length; info.sheet.getRange(1, imgCol + 1).setValue('ImageURL'); }
-    info.sheet.getRange(rowNum, imgCol + 1).setValue(newImageUrl);
-    ensureImageShared_(newImageUrl);             // make it viewable in <img> tags
+    let imgsCol2 = findColIdx(info.headers, 'ImageURLs');
+    if (imgsCol2 < 0) { imgsCol2 = Math.max(info.headers.length, imgCol + 1); info.sheet.getRange(1, imgsCol2 + 1).setValue('ImageURLs'); }
+    info.sheet.getRange(rowNum, imgCol + 1).setValue(newImageUrls[0] || newImageUrl);
+    info.sheet.getRange(rowNum, imgsCol2 + 1).setValue(imageUrlsField_(newImageUrls));
+    newImageUrls.forEach(function (u) { ensureImageShared_(u); }); // make it viewable in <img> tags
     // Orphan cleanup: if the image actually changed to a different Drive file
     // (or was cleared), trash the previous one so it doesn't linger forever.
-    if (oldImageUrl && driveIdFromUrl_(oldImageUrl) && driveIdFromUrl_(oldImageUrl) !== driveIdFromUrl_(newImageUrl)) {
+    if (oldImageUrl && driveIdFromUrl_(oldImageUrl) && driveIdFromUrl_(oldImageUrl) !== driveIdFromUrl_(newImageUrls[0] || newImageUrl)) {
       trashDriveImage_(oldImageUrl);
     }
   }
@@ -1361,7 +1440,7 @@ function usageText_(value, maxLength) {
 function apiInfo() {
   return {
     success: true,
-    appVersion: '2.12.7',
+    appVersion: '2.12.9',
     usageLogVersion: 3,
     usageCapabilities: ['append-events', 'idempotent-event-id', 'confirm-event', 'draft-recovery']
   };
@@ -1858,7 +1937,7 @@ function updatePartUsage(params) {
 const PENDINGPARTS_SHEET = 'PendingParts';
 const PENDINGPARTS_HEADERS = [
   'PendingId', 'CreatedAt', 'RequisitionName', 'ImageURL',
-  'MachineNo', 'MachineType', 'Customer', 'OrderId', 'RecordedBy'
+  'MachineNo', 'MachineType', 'Customer', 'OrderId', 'RecordedBy', 'ImageURLs'
 ];
 
 function getPendingPartsSheet_() {
@@ -1869,6 +1948,10 @@ function getPendingPartsSheet_() {
     sh.appendRow(PENDINGPARTS_HEADERS);
     sh.setFrozenRows(1);
   }
+  var headers = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), PENDINGPARTS_HEADERS.length)).getValues()[0];
+  PENDINGPARTS_HEADERS.forEach(function (h, i) {
+    if (String(headers[i] || '').trim() !== h) sh.getRange(1, i + 1).setValue(h);
+  });
   return sh;
 }
 
@@ -1894,16 +1977,22 @@ function addPendingPart(params) {
     const isNew = rowNum === -1;
     const pendingId = isNew ? ('p-' + Utilities.getUuid().slice(0, 8))
                             : String(sh.getRange(rowNum, 1).getValue());
+    const existingImageURL = isNew ? '' : String(sh.getRange(rowNum, 4).getValue() || '');
+    const existingImageURLs = isNew ? '' : String(sh.getRange(rowNum, 10).getValue() || '');
+    const incomingUrls = imageUrlList_(params && params.imageURLs)
+      .concat(imageUrlList_(params && params.imageURL));
+    const mergedUrls = mergeImageUrls_(mergeImageUrls_(existingImageURLs, existingImageURL), incomingUrls);
     const row = [
       pendingId,
       isNew ? new Date() : (sh.getRange(rowNum, 2).getValue() || new Date()),
       name,
-      String((params.imageURL) || '') || (isNew ? '' : String(sh.getRange(rowNum, 4).getValue() || '')),
+      mergedUrls[0] || '',
       String((params.machineNo) || ''),
       String((params.machineType) || ''),
       String((params.customer) || ''),
       String((params.orderId) || ''),
-      String((params.recordedBy) || '')
+      String((params.recordedBy) || ''),
+      imageUrlsField_(mergedUrls)
     ];
     if (isNew) sh.appendRow(row);
     else sh.getRange(rowNum, 1, 1, PENDINGPARTS_HEADERS.length).setValues([row]);
@@ -1914,6 +2003,7 @@ function addPendingPart(params) {
 function getPendingParts(params) {
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PENDINGPARTS_SHEET);
   if (!sh || sh.getLastRow() < 2) return { success: true, rows: [] };
+  getPendingPartsSheet_();
   const values = sh.getRange(2, 1, sh.getLastRow() - 1, PENDINGPARTS_HEADERS.length).getValues();
   const rows = [];
   for (var i = values.length - 1; i >= 0; i--) {   // newest first

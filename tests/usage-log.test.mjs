@@ -392,9 +392,9 @@ test('draft recovery writes only missing rows to a separate idempotent sheet', (
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.7"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.7'/);
-  assert.match(worker, /schmoll-export-v14/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.9"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.9'/);
+  assert.match(worker, /schmoll-export-v16/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -440,22 +440,67 @@ test('pdf ready card does not expose duplicate open or download controls', () =>
 test('pdf photo layout supports multi-photo items and optional extra photo pages', () => {
   assert.match(html, /function collectOrderPhotoSlots\(ord\)/,
     'PDF export needs to flatten every item photo into ordered photo slots');
+  assert.match(html, /function itemPhotoEditGroups\(it\)/,
+    'the edit UI needs the same per-item grouping that the PDF uses');
+  assert.match(html, /itemPhotoEditGroups\(it\)\.forEach/,
+    'ticking combine-two must immediately render paired photos in the same editable canvas');
+  assert.match(html, /itemPhotoPack[\s\S]{0,260}renderItemPhoto\(idx\)/,
+    'changing the combine-two checkbox must immediately redraw the item photo editor');
   assert.match(html, /packPhotosTwoPerBox/,
     'each item needs an opt-in flag for combining two photos in one PDF box');
   assert.match(html, /autoExtraPhotoPages/,
     'orders need a switch to disable automatic extra photo pages');
-  assert.match(html, /function renderPhotoTableHtml\(photoSlots\)/,
+  assert.match(html, /function renderPhotoTableHtml\(photoSlots,\s*opts\)/,
     'the original 4-box photo table must be reusable on later pages');
+  assert.match(html, /class="pdoc pdoc-photo-extra"/,
+    'extra photo pages should be lightweight photo-only pages, not repeat the full form header');
+  assert.match(html, /renderPhotoTableHtml\(slots,\s*\{showTitle:false\}\)/,
+    'extra photo pages should add the next four boxes without repeating a title row');
   assert.match(html, /root\.querySelectorAll\('\.pdoc'\)/,
     'PDF generation must render every generated page, not just the first .pdoc');
   assert.match(html, /doc\.addPage\(\)/,
     'multi-page photo output must add jsPDF pages after the first');
+  assert.match(html, /_pdfPreviewPageImgData\s*=/,
+    'the preview modal must keep every rendered PDF page image, not only the first');
+  assert.match(html, /function renderPdfPreviewPages\(\)/,
+    'the preview modal must render page 2+ when the PDF has extra photo pages');
+  assert.match(html, /id="pdfModalPages"/,
+    'the PDF preview modal needs a multi-page container');
   assert.match(html, /id="extraPhotoPagesControl"/,
     'Main Info must expose the auto-extra-pages toggle only when it matters');
   assert.match(html, /itemPhotoPack/,
     'each item row needs its own combine-two-photos checkbox');
   assert.doesNotMatch(html, /slice\(0,4\)/,
     'photo export must not silently drop photos at the old four-photo cap');
+});
+
+test('database, pending queue, log, and Excel export preserve multiple part photos', () => {
+  assert.match(html, /function imageUrlList\(source\)/,
+    'all DB/log views need one shared parser for ImageURL + ImageURLs');
+  assert.match(html, /function imageStripHtml\(source/,
+    'database and pending cards should render multiple thumbnails, not only the first image');
+  assert.match(html, /function addPendingPartImage\(key,\s*payload\)/,
+    'new order photos must append to the pending upload bucket instead of overwriting it');
+  assert.match(html, /pendingPartImageList\(articleNo,desc,it\)/,
+    'save/export must collect every queued photo for the part');
+  assert.match(html, /for\(const pending of pendingList\)/,
+    'recordCodelessPartsOnSave must upload every pending image payload');
+  assert.match(html, /imageURLs:urls/,
+    'frontend DB writes must send the full image URL list to Apps Script');
+  assert.match(html, /resolveUsageImageUrls/,
+    'usage log rows must resolve a list of matching images');
+  assert.match(html, /buildXlsxBytesWithImages\(rows,\s*imageGroups/,
+    'Excel export must accept multiple image groups per row');
+  assert.match(html, /rowIndex,photoIndex/,
+    'embedded XLSX media must keep each photo distinct inside a row');
+  assert.match(backendSource, /ImageURLs/,
+    'backend must have a durable ImageURLs field alongside legacy ImageURL');
+  assert.match(backendSource, /imageUrlList_\(params\.imageURLs/,
+    'Apps Script must parse imageURLs arrays/JSON when writing sheets');
+  assert.match(backendSource, /appendImageUrlsToPart_/,
+    'setImageURL should append new Drive URLs instead of replacing previous photos');
+  assert.match(backendSource, /PENDINGPARTS_HEADERS[\s\S]*'ImageURLs'/,
+    'pending parts queue must store multiple image URLs too');
 });
 
 test('queued usage logs retry automatically without relying on an end-user button', () => {
