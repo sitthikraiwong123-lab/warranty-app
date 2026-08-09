@@ -1345,6 +1345,7 @@ const PARTUSAGE_HEADERS = [
   'EventId', 'Revision', 'Action'
 ];
 const PARTUSAGE_MAX_ITEMS = 200;
+const PARTUSAGE_DUPLICATE_WINDOW_MS = 2 * 60 * 1000;
 const PARTUSAGE_ACTIONS = {
   save:true, pdf_preview:true, download:true, share:true,
   email_share:true, email_graph:true, email_deeplink:true,
@@ -1360,7 +1361,7 @@ function usageText_(value, maxLength) {
 function apiInfo() {
   return {
     success: true,
-    appVersion: '2.12.5',
+    appVersion: '2.12.6',
     usageLogVersion: 3,
     usageCapabilities: ['append-events', 'idempotent-event-id', 'confirm-event', 'draft-recovery']
   };
@@ -1388,6 +1389,50 @@ function getPartUsageSheet_() {
   return ensurePartUsageHeaders_(sh);
 }
 
+function usageRecordedBy_(value) {
+  return usageText_(value, 150).trim() || '-';
+}
+
+function usageComparable_(value) {
+  return String(value == null ? '' : value);
+}
+
+function usageRowComparable_(row) {
+  return [
+    row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8],
+    row[9], row[10], row[11], row[12], row[15]
+  ].map(usageComparable_).join('\u001f');
+}
+
+function findRecentDuplicateUsageEvent_(existing, rows, nowTime) {
+  if (!rows.length) return null;
+  const eventCol = PARTUSAGE_HEADERS.indexOf('EventId');
+  const revisionCol = PARTUSAGE_HEADERS.indexOf('Revision');
+  const groups = {};
+  existing.forEach(function(row) {
+    const eventId = String(row[eventCol] || '').trim();
+    if (!eventId) return;
+    if (!groups[eventId]) groups[eventId] = [];
+    groups[eventId].push(row);
+  });
+  const target = rows.map(usageRowComparable_);
+  const ids = Object.keys(groups);
+  for (var i = ids.length - 1; i >= 0; i--) {
+    const group = groups[ids[i]];
+    if (group.length !== rows.length) continue;
+    const t = new Date(group[0][0]).getTime();
+    if (!isFinite(t) || Math.abs(nowTime - t) > PARTUSAGE_DUPLICATE_WINDOW_MS) continue;
+    var same = true;
+    for (var r = 0; r < target.length; r++) {
+      if (usageRowComparable_(group[r]) !== target[r]) { same = false; break; }
+    }
+    if (same) {
+      return { eventId:ids[i], revision:Number(group[0][revisionCol]) || 1 };
+    }
+  }
+  return null;
+}
+
 // Append one immutable usage event. Reusing EventId is an idempotent retry;
 // reusing OrderId with a new EventId creates the next revision and preserves
 // every earlier row.
@@ -1410,7 +1455,7 @@ function recordPartUsage(params) {
     const revisionCol = PARTUSAGE_HEADERS.indexOf('Revision');
     let revision = 1;
     if (last > 1) {
-      const existing = sh.getRange(2, 1, last - 1, PARTUSAGE_HEADERS.length).getValues();
+      var existing = sh.getRange(2, 1, last - 1, PARTUSAGE_HEADERS.length).getValues();
       let existingCount = 0;
       let existingRevision = 0;
       existing.forEach(function (row) {
@@ -1435,9 +1480,10 @@ function recordPartUsage(params) {
     }
 
     const now = new Date();
+    const nowTime = now.getTime();
     const type = usageText_((params && params.type) || '', 100);
     const customer = usageText_((params && params.customer) || '', 250);
-    const recordedBy = usageText_((params && params.recordedBy) || '(unknown)', 150) || '(unknown)';
+    const recordedBy = usageRecordedBy_(params && params.recordedBy);
     const rows = [];
     items.forEach(function (it) {
       const art = usageText_((it && it.articleNo) || '', 150).trim();
@@ -1456,12 +1502,19 @@ function recordPartUsage(params) {
     if (isFinite(expectedItems) && expectedItems >= 0 && expectedItems !== rows.length) {
       throw new Error('usage item count mismatch: ' + rows.length + '/' + expectedItems);
     }
+    const duplicate = findRecentDuplicateUsageEvent_(existing || [], rows, nowTime);
+    if (duplicate) {
+      return {
+        success:true, orderId:orderId, eventId:eventId, duplicateOfEventId:duplicate.eventId,
+        revision:duplicate.revision, written:rows.length, idempotent:false, duplicateSkipped:true
+      };
+    }
     if (rows.length) {
       sh.getRange(sh.getLastRow() + 1, 1, rows.length, PARTUSAGE_HEADERS.length).setValues(rows);
     }
     return {
       success:true, orderId:orderId, eventId:eventId,
-      revision:revision, written:rows.length, idempotent:false
+      revision:revision, written:rows.length, idempotent:false, duplicateSkipped:false
     };
   } finally {
     try { lock.releaseLock(); } catch (e) {}
@@ -1710,7 +1763,7 @@ function recoverPartUsageDrafts(params) {
           orderId, usageText_(draft.type || '', 100), usageText_(draft.customer || '', 250),
           normalizedItem.machineNo, normalizedItem.machineType, articleNo, partName,
           normalizedItem.qty, normalizedItem.unit, normalizedItem.note, normalizedItem.setName,
-          usageText_(draft.recordedBy || '(unknown)', 150) || '(unknown)', recoveryId, 'local_draft'
+          usageRecordedBy_(draft.recordedBy), recoveryId, 'local_draft'
         ]);
       });
     });

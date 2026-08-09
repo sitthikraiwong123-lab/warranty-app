@@ -66,7 +66,7 @@ test('usage core rejects invalid events and reports saved, queued, failed, and e
     action:'save', eventId:'empty-event', recordedBy:'', createdAt:'2026-08-09T00:00:00.000Z'
   });
   assert.equal(empty.expectedItems, 0);
-  assert.equal(empty.recordedBy, '(unknown)');
+  assert.equal(empty.recordedBy, '-');
   assert.throws(() => core.validateUsageAck(null, empty), /acknowledged/i);
   assert.throws(() => core.validateUsageAck({queued:true,eventId:'other'}, empty), /event/i);
   assert.deepEqual(core.validateUsageAck({success:true,eventId:'empty-event',written:0,revision:0}, empty), {
@@ -109,7 +109,7 @@ test('draft recovery snapshots only meaningful items without changing the drafts
     {id:'draft-defaults',items:[null,{description:'Only a name',qty:''}]}
   ]);
   assert.equal(defaults.drafts.length, 1);
-  assert.equal(defaults.drafts[0].recordedBy, '(unknown)');
+  assert.equal(defaults.drafts[0].recordedBy, '-');
   assert.equal(defaults.drafts[0].items[0].qty, '');
   assert.throws(() => buildDraftRecoveryBatch(null), /array/);
   assert.throws(() => buildDraftRecoveryBatch(Array.from({length:11},(_,i)=>({id:'d'+i,items:[]}))), /10/);
@@ -257,6 +257,52 @@ test('backend validates action and caps a single usage event', () => {
   assert.throws(() => api.recordPartUsage({orderId:'x',eventId:'e',action:'save',items:Array.from({length:201},()=>({partName:'A'}))}), /200/);
 });
 
+test('backend skips an exact duplicate event only inside the short duplicate window', () => {
+  const headers = [
+    'Timestamp','OrderId','Type','Customer','MachineNo','MachineType',
+    'ArticleNo','PartName','Qty','Unit','Note','SetName','RecordedBy',
+    'EventId','Revision','Action'
+  ];
+  const recent = new Date(Date.now() - 30000);
+  const old = new Date(Date.now() - 5 * 60 * 1000);
+  const duplicateItem = {
+    articleNo:'63598', partName:'LASER DLS5', machineNo:'M1', machineType:'MXY-6',
+    qty:1, unit:'pcs', note:'', setName:''
+  };
+  const { usageSheet, api } = loadBackendWithUsageSheet([headers, [
+    recent, 'order-dedupe', 'Warranty', 'WUS-TH', 'M1', 'MXY-6', '63598', 'LASER DLS5',
+    '1', 'pcs', '', '', '-', 'evt-recent', 1, 'pdf_preview'
+  ]]);
+
+  const duplicate = api.recordPartUsage({
+    orderId:'order-dedupe', eventId:'evt-new-duplicate', action:'pdf_preview',
+    type:'Warranty', customer:'WUS-TH', recordedBy:'', expectedItems:1, items:[duplicateItem]
+  });
+
+  assert.equal(duplicate.written, 1);
+  assert.equal(duplicate.duplicateSkipped, true);
+  assert.equal(usageSheet.rows.length, 2, 'exact duplicate inside the window must not append a row');
+
+  const changed = api.recordPartUsage({
+    orderId:'order-dedupe', eventId:'evt-new-changed', action:'pdf_preview',
+    type:'Warranty', customer:'WUS-TH', recordedBy:'', expectedItems:1,
+    items:[{...duplicateItem, note:'changed'}]
+  });
+  assert.equal(changed.duplicateSkipped, false);
+  assert.equal(usageSheet.rows.length, 3, 'a changed field must still create a new log');
+
+  const { usageSheet: oldSheet, api: oldApi } = loadBackendWithUsageSheet([headers, [
+    old, 'order-dedupe', 'Warranty', 'WUS-TH', 'M1', 'MXY-6', '63598', 'LASER DLS5',
+    '1', 'pcs', '', '', '-', 'evt-old', 1, 'pdf_preview'
+  ]]);
+  const later = oldApi.recordPartUsage({
+    orderId:'order-dedupe', eventId:'evt-later', action:'pdf_preview',
+    type:'Warranty', customer:'WUS-TH', recordedBy:'', expectedItems:1, items:[duplicateItem]
+  });
+  assert.equal(later.duplicateSkipped, false);
+  assert.equal(oldSheet.rows.length, 3, 'the same data outside the short window must be logged');
+});
+
 test('usage API routing preserves the user action instead of sending it as the endpoint action', () => {
   const headers = [
     'Timestamp','OrderId','Type','Customer','MachineNo','MachineType',
@@ -346,9 +392,9 @@ test('draft recovery writes only missing rows to a separate idempotent sheet', (
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.5"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.5'/);
-  assert.match(worker, /schmoll-export-v12/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.6"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.6'/);
+  assert.match(worker, /schmoll-export-v13/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -377,6 +423,18 @@ test('every user-visible order action is wired to an append-only usage event', (
   assert.match(html, /ซิงค์ Log ที่รอ/);
   assert.match(html, /usageLogVersion/);
   assert.match(html, /PartUsageRecovery/);
+});
+
+test('pdf ready card does not expose duplicate open or download controls', () => {
+  assert.match(html, /id="previewCard"/);
+  assert.doesNotMatch(html, /id="btnOpenPdf"/,
+    'the standalone PDF Ready card must not keep a second open-PDF button');
+  assert.doesNotMatch(html, /id="btnDownloadPdf"/,
+    'the standalone PDF Ready card must not keep a second download-PDF button');
+  assert.doesNotMatch(html, /document\.getElementById\('btnOpenPdf'\)/);
+  assert.doesNotMatch(html, /document\.getElementById\('btnDownloadPdf'\)/);
+  assert.match(html, /id="pmSavePdf"/,
+    'the PDF preview menu still needs its save/download action');
 });
 
 test('queued usage logs retry automatically without relying on an end-user button', () => {
