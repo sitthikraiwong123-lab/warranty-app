@@ -1319,75 +1319,126 @@ function logoutSession(params) {
 // "Where has this part been requisitioned to?"  One FLAT row per
 // (order x part), denormalized on purpose: Customer / MachineNo /
 // MachineType / PartName are copied onto every row so the sheet can be
-// filtered or pivoted by hand in Google Sheets with no joins. Written only
-// when an order is actually exported (a real requisition), and upserted by
-// OrderId so re-exporting the same order replaces its rows instead of
-// duplicating them.
+// filtered or pivoted by hand in Google Sheets with no joins. Every explicit
+// Save / Preview / Download / Share / Email action is appended as an immutable
+// EventId + Revision snapshot. Editing the same OrderId never removes history.
 // ============================================================
 const PARTUSAGE_SHEET = 'PartUsage';
 const PARTUSAGE_HEADERS = [
   'Timestamp', 'OrderId', 'Type', 'Customer', 'MachineNo', 'MachineType',
-  'ArticleNo', 'PartName', 'Qty', 'Unit', 'Note', 'SetName', 'RecordedBy'
+  'ArticleNo', 'PartName', 'Qty', 'Unit', 'Note', 'SetName', 'RecordedBy',
+  'EventId', 'Revision', 'Action'
 ];
+const PARTUSAGE_MAX_ITEMS = 200;
+const PARTUSAGE_ACTIONS = {
+  save:true, pdf_preview:true, download:true, share:true,
+  email_share:true, email_graph:true, email_deeplink:true,
+  auto_email:true, legacy_export:true
+};
+
+function usageText_(value, maxLength) {
+  var out = String(value == null ? '' : value).slice(0, maxLength || 500);
+  if (/^[=+@]/.test(out) || /^-\d/.test(out)) out = "'" + out;
+  return out;
+}
+
+function ensurePartUsageHeaders_(sh) {
+  if (sh.getLastRow() < 1) {
+    sh.appendRow(PARTUSAGE_HEADERS);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+  var current = sh.getRange(1, 1, 1, PARTUSAGE_HEADERS.length).getValues()[0];
+  var differs = PARTUSAGE_HEADERS.some(function (header, index) { return current[index] !== header; });
+  if (differs) sh.getRange(1, 1, 1, PARTUSAGE_HEADERS.length).setValues([PARTUSAGE_HEADERS]);
+  sh.setFrozenRows(1);
+  return sh;
+}
 
 function getPartUsageSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sh = ss.getSheetByName(PARTUSAGE_SHEET);
   if (!sh) {
     sh = ss.insertSheet(PARTUSAGE_SHEET);
-    sh.appendRow(PARTUSAGE_HEADERS);
-    sh.setFrozenRows(1);
   }
-  return sh;
+  return ensurePartUsageHeaders_(sh);
 }
 
-// Replace every row belonging to `orderId` with the order's current items.
-// params: { orderId, type, customer, recordedBy, items:[{articleNo, partName,
-//           machineNo, machineType, qty, unit, note, setName}] }
+// Append one immutable usage event. Reusing EventId is an idempotent retry;
+// reusing OrderId with a new EventId creates the next revision and preserves
+// every earlier row.
 function recordPartUsage(params) {
-  const orderId = String((params && params.orderId) || '').trim();
+  const orderId = usageText_((params && params.orderId) || '', 200).trim();
   if (!orderId) throw new Error('orderId required');
-  const items = (params && params.items) || [];
+  const items = Array.isArray(params && params.items) ? params.items : [];
+  if (items.length > PARTUSAGE_MAX_ITEMS) throw new Error('items exceeds 200');
+  const eventId = usageText_((params && params.eventId) || Utilities.getUuid(), 200).trim();
+  if (!eventId) throw new Error('eventId required');
+  const action = String((params && params.action) || 'legacy_export').trim();
+  if (!PARTUSAGE_ACTIONS[action]) throw new Error('invalid usage action');
 
   const sh = getPartUsageSheet_();
   const lock = LockService.getScriptLock();
   try { lock.waitLock(20000); } catch (e) { throw new Error('busy, try again'); }
   try {
-    // 1) delete this order's existing rows (bottom-up so indexes stay valid)
     const last = sh.getLastRow();
+    const eventCol = PARTUSAGE_HEADERS.indexOf('EventId');
+    const revisionCol = PARTUSAGE_HEADERS.indexOf('Revision');
+    let revision = 1;
     if (last > 1) {
-      const ids = sh.getRange(2, 2, last - 1, 1).getValues(); // col B = OrderId
-      for (var r = ids.length - 1; r >= 0; r--) {
-        if (String(ids[r][0]).trim() === orderId) sh.deleteRow(r + 2);
+      const existing = sh.getRange(2, 1, last - 1, PARTUSAGE_HEADERS.length).getValues();
+      let existingCount = 0;
+      let existingRevision = 0;
+      existing.forEach(function (row) {
+        if (String(row[eventCol] || '').trim() === eventId) {
+          existingCount++;
+          existingRevision = Math.max(existingRevision, Number(row[revisionCol]) || 0);
+        }
+        if (String(row[1] || '').trim() === orderId) {
+          revision = Math.max(revision, (Number(row[revisionCol]) || 0) + 1);
+        }
+      });
+      if (existingCount) {
+        const expectedItems = Number(params && params.expectedItems);
+        if (isFinite(expectedItems) && expectedItems >= 0 && expectedItems !== existingCount) {
+          throw new Error('usage item count mismatch: ' + existingCount + '/' + expectedItems);
+        }
+        return {
+          success:true, orderId:orderId, eventId:eventId,
+          revision:existingRevision || 1, written:existingCount, idempotent:true
+        };
       }
     }
 
-    // 2) append the current items
     const now = new Date();
-    const type = String((params && params.type) || '');
-    const customer = String((params && params.customer) || '');
-    const recordedBy = String((params && params.recordedBy) || '');
+    const type = usageText_((params && params.type) || '', 100);
+    const customer = usageText_((params && params.customer) || '', 250);
+    const recordedBy = usageText_((params && params.recordedBy) || '(unknown)', 150) || '(unknown)';
     const rows = [];
     items.forEach(function (it) {
-      const art = String((it && it.articleNo) || '').trim();
-      const name = String((it && it.partName) || '').trim();
-      // Record coded parts by code AND still-codeless parts by name — a part
-      // that only has a name was requisitioned too, and its "used here" history
-      // is exactly what identifies it later. Skip only rows with neither.
+      const art = usageText_((it && it.articleNo) || '', 150).trim();
+      const name = usageText_((it && it.partName) || '', 500).trim();
       if (!art && !name) return;
       rows.push([
         now, orderId, type, customer,
-        String(it.machineNo || ''), String(it.machineType || ''),
+        usageText_(it.machineNo || '', 150), usageText_(it.machineType || '', 250),
         art, name,
-        it.qty === '' || it.qty == null ? '' : it.qty,
-        String(it.unit || ''), String(it.note || ''), String(it.setName || ''),
-        recordedBy
+        it.qty === '' || it.qty == null ? '' : usageText_(it.qty, 50),
+        usageText_(it.unit || '', 50), usageText_(it.note || '', 2000), usageText_(it.setName || '', 250),
+        recordedBy, eventId, revision, action
       ]);
     });
+    const expectedItems = Number(params && params.expectedItems);
+    if (isFinite(expectedItems) && expectedItems >= 0 && expectedItems !== rows.length) {
+      throw new Error('usage item count mismatch: ' + rows.length + '/' + expectedItems);
+    }
     if (rows.length) {
       sh.getRange(sh.getLastRow() + 1, 1, rows.length, PARTUSAGE_HEADERS.length).setValues(rows);
     }
-    return { success: true, orderId: orderId, written: rows.length };
+    return {
+      success:true, orderId:orderId, eventId:eventId,
+      revision:revision, written:rows.length, idempotent:false
+    };
   } finally {
     try { lock.releaseLock(); } catch (e) {}
   }
@@ -1412,8 +1463,8 @@ function backfillPartUsageArticleNo(params) {
   if (!name) throw new Error('partName required');
   if (!articleNo) throw new Error('articleNo required');
 
-  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTUSAGE_SHEET);
-  if (!sh || sh.getLastRow() < 2) return { success: true, updated: 0 };
+  const sh = getPartUsageSheet_();
+  if (sh.getLastRow() < 2) return { success: true, updated: 0 };
 
   const lock = LockService.getScriptLock();
   try { lock.waitLock(20000); } catch (e) { throw new Error('busy, try again'); }
@@ -1449,8 +1500,8 @@ function getPartUsage(params) {
   if (!articleNo && !name) throw new Error('articleNo or name required');
   const limit = Number((params && params.limit) || 200);
 
-  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTUSAGE_SHEET);
-  if (!sh || sh.getLastRow() < 2) return { success: true, articleNo: articleNo, rows: [] };
+  const sh = getPartUsageSheet_();
+  if (sh.getLastRow() < 2) return { success: true, articleNo: articleNo, rows: [] };
 
   const values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_HEADERS.length).getValues();
   const out = [];
@@ -1469,8 +1520,8 @@ function getPartUsage(params) {
 
 function getAllPartUsage(params) {
   var limit = Number((params && params.limit) || 500);
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTUSAGE_SHEET);
-  if (!sh || sh.getLastRow() < 2) return { success: true, rows: [] };
+  var sh = getPartUsageSheet_();
+  if (sh.getLastRow() < 2) return { success: true, rows: [] };
   var values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_HEADERS.length).getValues();
   var out = [];
   for (var i = values.length - 1; i >= 0 && out.length < limit; i--) {
