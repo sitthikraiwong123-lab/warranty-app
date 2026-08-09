@@ -392,9 +392,9 @@ test('draft recovery writes only missing rows to a separate idempotent sheet', (
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.7"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.7'/);
-  assert.match(worker, /schmoll-export-v14/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.8"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.8'/);
+  assert.match(worker, /schmoll-export-v15/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -440,16 +440,32 @@ test('pdf ready card does not expose duplicate open or download controls', () =>
 test('pdf photo layout supports multi-photo items and optional extra photo pages', () => {
   assert.match(html, /function collectOrderPhotoSlots\(ord\)/,
     'PDF export needs to flatten every item photo into ordered photo slots');
+  assert.match(html, /function itemPhotoEditGroups\(it\)/,
+    'the edit UI needs the same per-item grouping that the PDF uses');
+  assert.match(html, /itemPhotoEditGroups\(it\)\.forEach/,
+    'ticking combine-two must immediately render paired photos in the same editable canvas');
+  assert.match(html, /itemPhotoPack[\s\S]{0,260}renderItemPhoto\(idx\)/,
+    'changing the combine-two checkbox must immediately redraw the item photo editor');
   assert.match(html, /packPhotosTwoPerBox/,
     'each item needs an opt-in flag for combining two photos in one PDF box');
   assert.match(html, /autoExtraPhotoPages/,
     'orders need a switch to disable automatic extra photo pages');
-  assert.match(html, /function renderPhotoTableHtml\(photoSlots\)/,
+  assert.match(html, /function renderPhotoTableHtml\(photoSlots,\s*opts\)/,
     'the original 4-box photo table must be reusable on later pages');
+  assert.match(html, /class="pdoc pdoc-photo-extra"/,
+    'extra photo pages should be lightweight photo-only pages, not repeat the full form header');
+  assert.match(html, /renderPhotoTableHtml\(slots,\s*\{showTitle:false\}\)/,
+    'extra photo pages should add the next four boxes without repeating a title row');
   assert.match(html, /root\.querySelectorAll\('\.pdoc'\)/,
     'PDF generation must render every generated page, not just the first .pdoc');
   assert.match(html, /doc\.addPage\(\)/,
     'multi-page photo output must add jsPDF pages after the first');
+  assert.match(html, /_pdfPreviewPageImgData\s*=/,
+    'the preview modal must keep every rendered PDF page image, not only the first');
+  assert.match(html, /function renderPdfPreviewPages\(\)/,
+    'the preview modal must render page 2+ when the PDF has extra photo pages');
+  assert.match(html, /id="pdfModalPages"/,
+    'the PDF preview modal needs a multi-page container');
   assert.match(html, /id="extraPhotoPagesControl"/,
     'Main Info must expose the auto-extra-pages toggle only when it matters');
   assert.match(html, /itemPhotoPack/,
