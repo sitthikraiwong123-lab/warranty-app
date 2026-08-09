@@ -448,9 +448,9 @@ test('recovered draft usage is visible in history without mutating current PartU
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.16"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.16'/);
-  assert.match(worker, /schmoll-export-v23/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.17"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.17'/);
+  assert.match(worker, /schmoll-export-v24/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -561,10 +561,18 @@ test('database, pending queue, log, and Excel export preserve multiple part phot
     'usage log rows must resolve a list of matching images');
   assert.match(html, /data-gallery=/,
     'multi-photo log thumbnails should open as a gallery, not isolated single images');
+  assert.match(html, /class="lt-photo-more"[^>]*data-full=/,
+    'the +N overflow badge in Log must also open the same gallery, otherwise users cannot reach hidden photos');
+  assert.match(html, /querySelectorAll\('\.lt-photo \[data-full\]'\)/,
+    'Log photo wiring must attach to both thumbnail images and the +N overflow badge');
   assert.match(html, /function openImageLightbox\(url,\s*gallery,\s*startIndex\)/,
     'the image lightbox must support browsing several photos from the same item');
   assert.match(html, /lightbox-next/,
     'the image lightbox needs next/previous controls for multi-photo rows');
+  assert.match(html, /function buildXlsxBytes\(rows,[\s\S]*?<sheetViews><sheetView workbookViewId="0"><pane ySplit="\$\{headerRow\}" topLeftCell="A\$\{headerRow\+1\}" activePane="bottomLeft" state="frozen"\/><\/sheetView><\/sheetViews>/,
+    'normal Excel exports, including Log without embedded images, must freeze the header row');
+  assert.match(html, /function buildXlsxBytes\(rows,[\s\S]*?<autoFilter ref="A\$\{headerRow\}:\$\{colLetter\(ncol-1\)\}\$\{lastDataRow\}"\/>/,
+    'normal Excel exports should keep the filter dropdown on the frozen header row');
   assert.match(html, /buildXlsxBytesWithImages\(rows,\s*imageGroups/,
     'Excel export must accept multiple image groups per row');
   assert.match(html, /rowIndex,photoIndex/,
