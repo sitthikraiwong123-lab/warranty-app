@@ -434,9 +434,9 @@ test('recovered draft usage is visible in history without mutating current PartU
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.13"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.13'/);
-  assert.match(worker, /schmoll-export-v20/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.14"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.14'/);
+  assert.match(worker, /schmoll-export-v21/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -529,6 +529,10 @@ test('pdf photo layout supports multi-photo items and optional extra photo pages
 test('database, pending queue, log, and Excel export preserve multiple part photos', () => {
   assert.match(html, /function imageUrlList\(source\)/,
     'all DB/log views need one shared parser for ImageURL + ImageURLs');
+  assert.ok(
+    html.indexOf('function imageUrlList(source)') < html.indexOf("document.addEventListener('DOMContentLoaded'"),
+    'imageUrlList must be global, not scoped inside a modal boot block, because combo/log/save code calls it later'
+  );
   assert.match(html, /function imageStripHtml\(source/,
     'database and pending cards should render multiple thumbnails, not only the first image');
   assert.match(html, /function addPendingPartImage\(key,\s*payload\)/,
@@ -620,6 +624,10 @@ test('part editor can append and delete multiple stored photos', () => {
     'photo rendering must calculate natural-aspect fit boxes instead of stretching images to the cell shape');
   assert.match(html, /aspect:\s*w\s*\/\s*h/,
     'newly-added photos must remember their real aspect ratio for editor/PDF rendering');
+  assert.match(html, /function attachFocusDrag\(el,\s*box,\s*idx\)[\s\S]{0,500}HOLD_MS_MOVE/,
+    'long-pressing the center focus handle should be able to move the whole photo box');
+  assert.match(html, /boxMoveActive[\s\S]{0,700}img\.x\s*=\s*toFrac\(nl,\s*rect\.width\)/,
+    'the long-press focus-handle path must update the photo box x/y freely');
 });
 
 test('queued usage logs retry automatically without relying on an end-user button', () => {
