@@ -104,6 +104,7 @@ function handleRequest(e) {
       case 'getAllPartUsage':    result = getAllPartUsage(params); break;
       case 'getPartUsageEvent':  result = getPartUsageEvent(params); break;
       case 'recoverPartUsageDrafts': result = recoverPartUsageDrafts(params); break;
+      case 'deleteRecoveredPartUsage': result = deleteRecoveredPartUsage(params); break;
       case 'deletePartUsage':    result = deletePartUsage(params); break;
       case 'updatePartUsage':    result = updatePartUsage(params); break;
       case 'backfillPartUsageArticleNo': result = backfillPartUsageArticleNo(params); break;
@@ -1450,7 +1451,7 @@ function usageText_(value, maxLength) {
 function apiInfo() {
   return {
     success: true,
-    appVersion: '2.12.14',
+    appVersion: '2.12.15',
     usageLogVersion: 3,
     usageCapabilities: ['append-events', 'idempotent-event-id', 'confirm-event', 'draft-recovery']
   };
@@ -1848,6 +1849,45 @@ function listRecoveredPartUsageRows_(params) {
     out.push(recoveredUsageRowObject_(v, i + 2));
   }
   return out;
+}
+
+function recoveredUsageRowMatches_(values, match) {
+  if (!match) return true;
+  var row = recoveredUsageRowObject_(values, 0);
+  var keys = ['OrderId', 'ArticleNo', 'PartName', 'EventId', 'Action', 'Revision', 'Timestamp', 'RecoveredAt'];
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    if (!Object.prototype.hasOwnProperty.call(match, key)) continue;
+    if (recoveryComparable_(row[key]) !== recoveryComparable_(match[key])) return false;
+  }
+  return true;
+}
+
+function deleteRecoveredPartUsage(params) {
+  var row = Number(params && (params.row || params.recoveryRow));
+  if (!row || row < 2) throw new Error('row required');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTUSAGE_RECOVERY_SHEET);
+  if (!sh || sh.getLastRow() < 2) return { success: true, action: 'already_deleted' };
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    var match = params && params.match;
+    var rowNum = row <= sh.getLastRow() ? row : -1;
+    if (rowNum !== -1) {
+      var current = sh.getRange(rowNum, 1, 1, PARTUSAGE_RECOVERY_HEADERS.length).getValues()[0];
+      if (!recoveredUsageRowMatches_(current, match)) rowNum = -1;
+    }
+    if (rowNum === -1 && match) {
+      var values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_RECOVERY_HEADERS.length).getValues();
+      for (var i = values.length - 1; i >= 0; i--) {
+        if (recoveredUsageRowMatches_(values[i], match)) { rowNum = i + 2; break; }
+      }
+    }
+    if (rowNum === -1) return { success: true, action: 'already_deleted' };
+    sh.deleteRow(rowNum);
+    SpreadsheetApp.flush();
+    return { success: true, action: 'deleted', row: rowNum };
+  } finally { try { lock.releaseLock(); } catch (e) {} }
 }
 
 function recoverPartUsageDrafts(params) {

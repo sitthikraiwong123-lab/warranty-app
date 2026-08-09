@@ -189,6 +189,7 @@ function loadBackendWithUsageSheet(initialRows) {
     ;globalThis.__usageApi={recordPartUsage,getAllPartUsage,getPartUsageEvent,apiInfo,PARTUSAGE_HEADERS,
       getPartUsage:typeof getPartUsage==='function'?getPartUsage:null,
       handleRequest:typeof handleRequest==='function'?handleRequest:null,
+      deleteRecoveredPartUsage:typeof deleteRecoveredPartUsage==='function'?deleteRecoveredPartUsage:null,
       recoverPartUsageDrafts:typeof recoverPartUsageDrafts==='function'?recoverPartUsageDrafts:null,
       recoveryHeaders:typeof PARTUSAGE_RECOVERY_HEADERS==='undefined'?null:PARTUSAGE_RECOVERY_HEADERS};`, context);
   return { usageSheet, sheets, api:context.__usageApi };
@@ -429,14 +430,27 @@ test('recovered draft usage is visible in history without mutating current PartU
     'per-part usage modal must still load current history if recovered rows fail to merge');
   assert.match(html, /usage recovery merge failed, retrying current ledger only/,
     'recovery merge failures should not blank the whole usage log');
-  assert.match(html, /!r\._recovered[\s\S]{0,120}lt-edit/,
-    'recovered rows should be visible but not editable/deletable as PartUsage rows');
+  const deleteResult = api.deleteRecoveredPartUsage({
+    row: recovered._recoveryRow,
+    match: { OrderId: recovered.OrderId, ArticleNo: recovered.ArticleNo, PartName: recovered.PartName, EventId: recovered.EventId, Action: recovered.Action }
+  });
+  assert.equal(deleteResult.action, 'deleted');
+  assert.equal(api.getAllPartUsage({limit:10, includeRecovered:true}).rows.some(row => row.OrderId === 'draft-8'), false,
+    'deleting a recovered row should remove it from PartUsageRecovery history');
+  assert.deepEqual(usageSheet.rows, before, 'deleting recovery must still leave current PartUsage untouched');
+
+  assert.match(backendSource, /case 'deleteRecoveredPartUsage'/,
+    'Apps Script router must expose a separate delete action for recovered draft rows');
+  assert.match(html, /deleteRecoveredPartUsage/,
+    'the log modal must delete recovered rows through the recovery endpoint');
+  assert.doesNotMatch(html, /r\._recovered[\s\S]{0,140}lt-edit/,
+    'recovered rows should not expose the normal PartUsage edit button');
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.14"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.14'/);
-  assert.match(worker, /schmoll-export-v21/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.15"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.15'/);
+  assert.match(worker, /schmoll-export-v22/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -545,10 +559,22 @@ test('database, pending queue, log, and Excel export preserve multiple part phot
     'frontend DB writes must send the full image URL list to Apps Script');
   assert.match(html, /resolveUsageImageUrls/,
     'usage log rows must resolve a list of matching images');
+  assert.match(html, /data-gallery=/,
+    'multi-photo log thumbnails should open as a gallery, not isolated single images');
+  assert.match(html, /function openImageLightbox\(url,\s*gallery,\s*startIndex\)/,
+    'the image lightbox must support browsing several photos from the same item');
+  assert.match(html, /lightbox-next/,
+    'the image lightbox needs next/previous controls for multi-photo rows');
   assert.match(html, /buildXlsxBytesWithImages\(rows,\s*imageGroups/,
     'Excel export must accept multiple image groups per row');
   assert.match(html, /rowIndex,photoIndex/,
     'embedded XLSX media must keep each photo distinct inside a row');
+  assert.match(html, /const XLSX_IMAGE_COLUMN_WIDTH\s*=\s*180/,
+    'Excel image exports should reserve a wider photo column for multi-photo rows');
+  assert.match(html, /const XLSX_IMAGE_SINGLE_ROW_HEIGHT\s*=\s*150/,
+    'Excel image exports should use taller rows so embedded photos are readable');
+  assert.match(html, /slotW\s*=\s*multi\s*\?\s*Math\.floor\(imageColPx\s*\/\s*gridCols\)\s*:\s*imageColPx/,
+    'Excel embedded photos should scale from the actual image column width, not a tiny fixed thumbnail');
   assert.match(backendSource, /ImageURLs/,
     'backend must have a durable ImageURLs field alongside legacy ImageURL');
   assert.match(backendSource, /imageUrlList_\(params\.imageURLs/,
