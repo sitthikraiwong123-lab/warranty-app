@@ -83,6 +83,35 @@ test('usage core rejects invalid events and reports saved, queued, failed, and e
   assert.ok(core.createUsageEventId().length > 10);
 });
 
+test('draft recovery snapshots only meaningful items without changing the drafts', async () => {
+  const { buildDraftRecoveryBatch } = await import('../usage-log-core.mjs');
+  const drafts = [{
+    id:'draft-1', createdAt:10, updatedAt:20, type:'Warranty', customer:'WUS-TH',
+    items:[
+      {articleNo:'A',description:'Alpha',machineNo:'100',machineType:'MXY-6',qty:1,qtyUnit:'pcs'},
+      {articleNo:'',description:'Codeless',machineNo:'101',qty:2,qtyUnit:'set'},
+      {articleNo:'',description:'',machineNo:'102'}
+    ]
+  }];
+  const batch = buildDraftRecoveryBatch(drafts, {recordedBy:'Somchai'});
+  assert.equal(batch.drafts.length, 1);
+  assert.equal(batch.drafts[0].items.length, 2);
+  assert.equal(batch.drafts[0].recordedBy, 'Somchai');
+  drafts[0].items[0].description = 'mutated later';
+  assert.equal(batch.drafts[0].items[0].partName, 'Alpha');
+  const defaults = buildDraftRecoveryBatch([
+    null,
+    {id:' ',items:[]},
+    {id:'draft-defaults',items:[null,{description:'Only a name',qty:''}]}
+  ]);
+  assert.equal(defaults.drafts.length, 1);
+  assert.equal(defaults.drafts[0].recordedBy, '(unknown)');
+  assert.equal(defaults.drafts[0].items[0].qty, '');
+  assert.throws(() => buildDraftRecoveryBatch(null), /array/);
+  assert.throws(() => buildDraftRecoveryBatch(Array.from({length:11},(_,i)=>({id:'d'+i,items:[]}))), /10/);
+  assert.throws(() => buildDraftRecoveryBatch([{id:'too-many',items:Array.from({length:9},()=>({description:'Part'}))}]), /8/);
+});
+
 class FakeRange {
   constructor(sheet, row, column, rowCount = 1, columnCount = 1) {
     this.sheet = sheet;
@@ -124,9 +153,10 @@ class FakeSheet {
 
 function loadBackendWithUsageSheet(initialRows) {
   const usageSheet = new FakeSheet('PartUsage', initialRows);
+  const sheets = new Map([['PartUsage', usageSheet]]);
   const spreadsheet = {
-    getSheetByName(name) { return name === 'PartUsage' ? usageSheet : null; },
-    insertSheet(name) { assert.equal(name, 'PartUsage'); return usageSheet; }
+    getSheetByName(name) { return sheets.get(name) || null; },
+    insertSheet(name) { const sheet = new FakeSheet(name); sheets.set(name, sheet); return sheet; }
   };
   let uuidSequence = 0;
   const context = vm.createContext({
@@ -143,8 +173,11 @@ function loadBackendWithUsageSheet(initialRows) {
     DriveApp: {},
     PropertiesService: { getScriptProperties: () => ({getProperty(){return null;},setProperty(){}}) }
   });
-  vm.runInContext(backendSource + '\n;globalThis.__usageApi={recordPartUsage,getAllPartUsage,PARTUSAGE_HEADERS};', context);
-  return { usageSheet, api:context.__usageApi };
+  vm.runInContext(backendSource + `
+    ;globalThis.__usageApi={recordPartUsage,getAllPartUsage,PARTUSAGE_HEADERS,
+      recoverPartUsageDrafts:typeof recoverPartUsageDrafts==='function'?recoverPartUsageDrafts:null,
+      recoveryHeaders:typeof PARTUSAGE_RECOVERY_HEADERS==='undefined'?null:PARTUSAGE_RECOVERY_HEADERS};`, context);
+  return { usageSheet, sheets, api:context.__usageApi };
 }
 
 test('backend keeps every revision of the same order and retries are idempotent', () => {
@@ -206,10 +239,50 @@ test('backend validates action and caps a single usage event', () => {
   assert.throws(() => api.recordPartUsage({orderId:'x',eventId:'e',action:'save',items:Array.from({length:201},()=>({partName:'A'}))}), /200/);
 });
 
+test('draft recovery writes only missing rows to a separate idempotent sheet', () => {
+  const headers = [
+    'Timestamp','OrderId','Type','Customer','MachineNo','MachineType',
+    'ArticleNo','PartName','Qty','Unit','Note','SetName','RecordedBy',
+    'EventId','Revision','Action'
+  ];
+  const current = [new Date('2026-08-01T00:00:00Z'),'draft-1','Warranty','WUS-TH','100','MXY-6','A','Alpha',1,'pcs','','','User','e1',1,'pdf_preview'];
+  const { usageSheet, sheets, api } = loadBackendWithUsageSheet([headers,current]);
+  const before = usageSheet.rows.map(row=>[...row]);
+  const params = { drafts:[
+    {orderId:'draft-1',createdAt:10,updatedAt:20,type:'Warranty',customer:'WUS-TH',recordedBy:'Somchai',items:[
+      {articleNo:'A',partName:'Alpha',machineNo:'100',machineType:'MXY-6',qty:1,unit:'pcs',note:'',setName:''},
+      {articleNo:'B',partName:'Beta',machineNo:'100',machineType:'MXY-6',qty:2,unit:'pcs',note:'missing',setName:''}
+    ]},
+    {orderId:'draft-2',createdAt:30,updatedAt:40,type:'Purchase',customer:'KCEE',recordedBy:'Somchai',items:[
+      {articleNo:'C',partName:'=IMPORTXML("https://example.invalid")',machineNo:'200',machineType:'EXY-6',qty:1,unit:'set',note:'',setName:''}
+    ]}
+  ]};
+
+  const first = api.recoverPartUsageDrafts(params);
+  assert.equal(first.inserted, 2);
+  assert.equal(first.skippedCurrent, 1);
+  assert.deepEqual(usageSheet.rows, before, 'recovery must never modify PartUsage');
+  const recovery = sheets.get('PartUsageRecovery');
+  assert.ok(recovery);
+  assert.deepEqual(Array.from(recovery.rows[0]), Array.from(api.recoveryHeaders));
+  assert.equal(recovery.rows.length, 3);
+  assert.match(recovery.rows[2][9], /^'=/, 'recovered sheet values must be formula-safe');
+
+  const retry = api.recoverPartUsageDrafts(params);
+  assert.equal(retry.inserted, 0);
+  assert.equal(retry.skippedCurrent, 1);
+  assert.equal(retry.skippedRecovered, 2);
+  assert.equal(recovery.rows.length, 3, 'retry must not duplicate recovery rows');
+  assert.deepEqual(usageSheet.rows, before, 'retry must still leave PartUsage unchanged');
+
+  assert.throws(() => api.recoverPartUsageDrafts({drafts:Array.from({length:11},()=>({items:[]}))}), /10/);
+  assert.throws(() => api.recoverPartUsageDrafts({drafts:[{orderId:'x',items:Array.from({length:9},()=>({partName:'A'}))}]}), /8/);
+});
+
 test('every user-visible order action is wired to an append-only usage event', () => {
   assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs"><\/script>/);
   assert.match(worker, /'\.\/usage-log-core\.mjs'/);
-  assert.match(worker, /schmoll-export-v8/,
+  assert.match(worker, /schmoll-export-v9/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -230,4 +303,7 @@ test('every user-visible order action is wired to an append-only usage event', (
     'a usage failure after an output must not cancel the independent running-number commit');
   assert.doesNotMatch(backendSource, /function recordPartUsageLegacy_/,
     'the destructive OrderId replacement implementation must not remain callable');
+  assert.match(backendSource, /case 'recoverPartUsageDrafts'/);
+  assert.match(html, /recoverPartUsageDrafts/);
+  assert.match(html, /PartUsageRecovery/);
 });

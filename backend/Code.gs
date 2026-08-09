@@ -90,6 +90,7 @@ function handleRequest(e) {
       case 'recordPartUsage':    result = recordPartUsage(params); break;
       case 'getPartUsage':       result = getPartUsage(params); break;
       case 'getAllPartUsage':    result = getAllPartUsage(params); break;
+      case 'recoverPartUsageDrafts': result = recoverPartUsageDrafts(params); break;
       case 'deletePartUsage':    result = deletePartUsage(params); break;
       case 'updatePartUsage':    result = updatePartUsage(params); break;
       case 'backfillPartUsageArticleNo': result = backfillPartUsageArticleNo(params); break;
@@ -1531,6 +1532,145 @@ function getAllPartUsage(params) {
     out.push(o);
   }
   return { success: true, rows: out };
+}
+
+// ============================================================
+// PART USAGE RECOVERY — conservative reconstruction from local Drafts
+// ------------------------------------------------------------
+// Recovery NEVER writes, updates, or deletes PartUsage. It reads the current
+// ledger only to skip exact item occurrences that are already present, then
+// writes missing snapshots to a separate PartUsageRecovery sheet for review.
+// Re-running the same Draft snapshot is idempotent via RecoveryId.
+// ============================================================
+const PARTUSAGE_RECOVERY_SHEET = 'PartUsageRecovery';
+const PARTUSAGE_RECOVERY_HEADERS = [
+  'RecoveredAt', 'DraftCreatedAt', 'DraftUpdatedAt', 'OrderId', 'Type', 'Customer',
+  'MachineNo', 'MachineType', 'ArticleNo', 'PartName', 'Qty', 'Unit', 'Note',
+  'SetName', 'RecordedBy', 'RecoveryId', 'Source'
+];
+
+function recoveryComparable_(value) {
+  var out = String(value == null ? '' : value).trim().toLowerCase();
+  if (/^'[=+@]/.test(out) || /^'-\d/.test(out)) out = out.slice(1);
+  return out;
+}
+
+function recoverySignature_(orderId, item) {
+  item = item || {};
+  return [
+    orderId, item.articleNo, item.partName, item.machineNo, item.machineType,
+    item.qty, item.unit, item.note, item.setName
+  ].map(recoveryComparable_).join('\u001f');
+}
+
+function recoverySheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(PARTUSAGE_RECOVERY_SHEET);
+  if (!sh) sh = ss.insertSheet(PARTUSAGE_RECOVERY_SHEET);
+  if (sh.getLastRow() < 1) {
+    sh.appendRow(PARTUSAGE_RECOVERY_HEADERS);
+  } else {
+    var current = sh.getRange(1, 1, 1, PARTUSAGE_RECOVERY_HEADERS.length).getValues()[0];
+    var differs = PARTUSAGE_RECOVERY_HEADERS.some(function(header, index) { return current[index] !== header; });
+    if (differs) sh.getRange(1, 1, 1, PARTUSAGE_RECOVERY_HEADERS.length).setValues([PARTUSAGE_RECOVERY_HEADERS]);
+  }
+  sh.setFrozenRows(1);
+  return sh;
+}
+
+function recoveryDate_(value) {
+  var millis = Number(value);
+  return isFinite(millis) && millis > 0 ? new Date(millis) : '';
+}
+
+function recoverPartUsageDrafts(params) {
+  var drafts = params && params.drafts;
+  if (!Array.isArray(drafts)) throw new Error('drafts array required');
+  if (drafts.length > 10) throw new Error('draft recovery exceeds 10 drafts');
+  drafts.forEach(function(draft) {
+    var items = Array.isArray(draft && draft.items) ? draft.items : [];
+    if (items.length > 8) throw new Error('draft recovery exceeds 8 items per draft');
+  });
+
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { throw new Error('busy, try again'); }
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var currentCounts = {};
+    var currentSheet = ss.getSheetByName(PARTUSAGE_SHEET); // read-only by design
+    if (currentSheet && currentSheet.getLastRow() > 1) {
+      var currentRows = currentSheet.getRange(2, 1, currentSheet.getLastRow() - 1, PARTUSAGE_HEADERS.length).getValues();
+      currentRows.forEach(function(row) {
+        var signature = recoverySignature_(row[1], {
+          machineNo:row[4], machineType:row[5], articleNo:row[6], partName:row[7],
+          qty:row[8], unit:row[9], note:row[10], setName:row[11]
+        });
+        currentCounts[signature] = (currentCounts[signature] || 0) + 1;
+      });
+    }
+
+    var recovery = recoverySheet_();
+    var recoveredIds = {};
+    if (recovery.getLastRow() > 1) {
+      var idColumn = PARTUSAGE_RECOVERY_HEADERS.indexOf('RecoveryId') + 1;
+      recovery.getRange(2, idColumn, recovery.getLastRow() - 1, 1).getValues().forEach(function(row) {
+        recoveredIds[String(row[0] || '')] = true;
+      });
+    }
+
+    var rows = [];
+    var skippedCurrent = 0;
+    var skippedRecovered = 0;
+    var skippedEmpty = 0;
+    var recoveredAt = new Date();
+    drafts.forEach(function(draft) {
+      draft = draft || {};
+      var orderId = usageText_(draft.orderId || '', 200).trim();
+      if (!orderId) { skippedEmpty++; return; }
+      var items = Array.isArray(draft.items) ? draft.items : [];
+      items.forEach(function(item, itemIndex) {
+        item = item || {};
+        var articleNo = usageText_(item.articleNo || '', 150).trim();
+        var partName = usageText_(item.partName || '', 500).trim();
+        if (!articleNo && !partName) { skippedEmpty++; return; }
+        var normalizedItem = {
+          articleNo:articleNo, partName:partName,
+          machineNo:usageText_(item.machineNo || '', 150),
+          machineType:usageText_(item.machineType || '', 250),
+          qty:item.qty === '' || item.qty == null ? '' : usageText_(item.qty, 50),
+          unit:usageText_(item.unit || '', 50), note:usageText_(item.note || '', 2000),
+          setName:usageText_(item.setName || '', 250)
+        };
+        var signature = recoverySignature_(orderId, normalizedItem);
+        if (currentCounts[signature] > 0) {
+          currentCounts[signature]--;
+          skippedCurrent++;
+          return;
+        }
+        var recoveryId = usageText_([
+          recoveryComparable_(orderId), Number(draft.updatedAt) || 0, itemIndex, signature
+        ].join('|'), 1000);
+        if (recoveredIds[recoveryId]) { skippedRecovered++; return; }
+        recoveredIds[recoveryId] = true;
+        rows.push([
+          recoveredAt, recoveryDate_(draft.createdAt), recoveryDate_(draft.updatedAt),
+          orderId, usageText_(draft.type || '', 100), usageText_(draft.customer || '', 250),
+          normalizedItem.machineNo, normalizedItem.machineType, articleNo, partName,
+          normalizedItem.qty, normalizedItem.unit, normalizedItem.note, normalizedItem.setName,
+          usageText_(draft.recordedBy || '(unknown)', 150) || '(unknown)', recoveryId, 'local_draft'
+        ]);
+      });
+    });
+    if (rows.length) {
+      recovery.getRange(recovery.getLastRow() + 1, 1, rows.length, PARTUSAGE_RECOVERY_HEADERS.length).setValues(rows);
+    }
+    return {
+      success:true, sheet:PARTUSAGE_RECOVERY_SHEET, inserted:rows.length,
+      skippedCurrent:skippedCurrent, skippedRecovered:skippedRecovered, skippedEmpty:skippedEmpty
+    };
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
 }
 
 // Guard for edit/delete: confirm the sheet row is still the exact record the
