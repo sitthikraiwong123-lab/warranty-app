@@ -1118,6 +1118,7 @@ function updatePart(params) {
 
   if (params.imageURL !== undefined) {
     const oldImageUrl = imgHeader ? String(oldData[imgHeader] || '') : '';
+    var oldImageUrls = mergeImageUrls_((imgsHeader ? oldData[imgsHeader] : ''), oldImageUrl);
     const newImageUrl = String(params.imageURL);
     const newImageUrls = imageUrlList_(params.imageURLs).concat(imageUrlList_(newImageUrl));
     let imgCol = info.imageCol;
@@ -1127,9 +1128,15 @@ function updatePart(params) {
     info.sheet.getRange(rowNum, imgCol + 1).setValue(newImageUrls[0] || newImageUrl);
     info.sheet.getRange(rowNum, imgsCol2 + 1).setValue(imageUrlsField_(newImageUrls));
     newImageUrls.forEach(function (u) { ensureImageShared_(u); }); // make it viewable in <img> tags
+    var newUrlKeys = {};
+    newImageUrls.forEach(function (url) { newUrlKeys[String(url || '').toLowerCase()] = true; });
+    var removedImageUrls = oldImageUrls.filter(function (url) {
+      return url && !newUrlKeys[String(url || '').toLowerCase()];
+    });
+    removedImageUrls.forEach(function (url) { trashDriveImage_(url); });
     // Orphan cleanup: if the image actually changed to a different Drive file
     // (or was cleared), trash the previous one so it doesn't linger forever.
-    if (oldImageUrl && driveIdFromUrl_(oldImageUrl) && driveIdFromUrl_(oldImageUrl) !== driveIdFromUrl_(newImageUrls[0] || newImageUrl)) {
+    if (!removedImageUrls.length && oldImageUrl && driveIdFromUrl_(oldImageUrl) && driveIdFromUrl_(oldImageUrl) !== driveIdFromUrl_(newImageUrls[0] || newImageUrl)) {
       trashDriveImage_(oldImageUrl);
     }
   }
@@ -1163,10 +1170,13 @@ function updatePart(params) {
 
   // Echo the stored image path back so the caller can confirm/rebind without
   // waiting for the next sync.
+  const finalImageUrls = (params.imageURL !== undefined)
+    ? imageUrlList_(params.imageURLs).concat(imageUrlList_(params.imageURL))
+    : (imgsHeader ? imageUrlList_(oldData[imgsHeader]).concat(imageUrlList_(imgHeader ? oldData[imgHeader] : '')) : imageUrlList_(imgHeader ? oldData[imgHeader] : ''));
   const finalImageURL = (params.imageURL !== undefined)
-    ? String(params.imageURL)
+    ? (finalImageUrls[0] || '')
     : (imgHeader ? String(oldData[imgHeader] || '') : '');
-  return { success: true, articleNo: newArticleNo, imageURL: finalImageURL };
+  return { success: true, articleNo: newArticleNo, imageURL: finalImageURL, imageURLs: finalImageUrls };
 }
 
 function updateMachine(params) {
@@ -1440,7 +1450,7 @@ function usageText_(value, maxLength) {
 function apiInfo() {
   return {
     success: true,
-    appVersion: '2.12.9',
+    appVersion: '2.12.11',
     usageLogVersion: 3,
     usageCapabilities: ['append-events', 'idempotent-event-id', 'confirm-event', 'draft-recovery']
   };
@@ -1657,36 +1667,48 @@ function getPartUsage(params) {
   const limit = Number((params && params.limit) || 200);
 
   const sh = getPartUsageSheet_();
-  if (sh.getLastRow() < 2) return { success: true, articleNo: articleNo, rows: [] };
-
-  const values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_HEADERS.length).getValues();
   const out = [];
-  for (var i = values.length - 1; i >= 0 && out.length < limit; i--) {
-    const v = values[i];
-    var match = articleNo
-      ? String(v[6]).trim().toLowerCase() === articleNo      // col G = ArticleNo
-      : String(v[7]).trim().toLowerCase() === name;          // col H = PartName
-    if (!match) continue;
-    const o = {};
-    PARTUSAGE_HEADERS.forEach(function (h, c) { o[h] = v[c] instanceof Date ? v[c].toISOString() : v[c]; });
-    out.push(o);
+  if (sh.getLastRow() >= 2) {
+    const values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_HEADERS.length).getValues();
+    for (var i = values.length - 1; i >= 0; i--) {
+      const v = values[i];
+      var match = articleNo
+        ? String(v[6]).trim().toLowerCase() === articleNo      // col G = ArticleNo
+        : String(v[7]).trim().toLowerCase() === name;          // col H = PartName
+      if (!match) continue;
+      const o = {};
+      PARTUSAGE_HEADERS.forEach(function (h, c) { o[h] = v[c] instanceof Date ? v[c].toISOString() : v[c]; });
+      o._row = i + 2;
+      out.push(o);
+    }
   }
-  return { success: true, articleNo: articleNo, rows: out };
+  if (!params || params.includeRecovered !== false) {
+    Array.prototype.push.apply(out, listRecoveredPartUsageRows_({
+      articleNo:articleNo, name:name, limit:Math.max(limit, 200)
+    }));
+  }
+  out.sort(compareUsageRowsNewest_);
+  return { success: true, articleNo: articleNo, rows: out.slice(0, limit) };
 }
 
 function getAllPartUsage(params) {
   var limit = Number((params && params.limit) || 500);
   var sh = getPartUsageSheet_();
-  if (sh.getLastRow() < 2) return { success: true, rows: [] };
-  var values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_HEADERS.length).getValues();
   var out = [];
-  for (var i = values.length - 1; i >= 0 && out.length < limit; i--) {
-    var o = {};
-    PARTUSAGE_HEADERS.forEach(function (h, c) { o[h] = values[i][c] instanceof Date ? values[i][c].toISOString() : values[i][c]; });
-    o._row = i + 2;                 // actual sheet row, so a client can edit/delete this exact entry
-    out.push(o);
+  if (sh.getLastRow() >= 2) {
+    var values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_HEADERS.length).getValues();
+    for (var i = values.length - 1; i >= 0; i--) {
+      var o = {};
+      PARTUSAGE_HEADERS.forEach(function (h, c) { o[h] = values[i][c] instanceof Date ? values[i][c].toISOString() : values[i][c]; });
+      o._row = i + 2;                 // actual sheet row, so a client can edit/delete this exact entry
+      out.push(o);
+    }
   }
-  return { success: true, rows: out };
+  if (!params || params.includeRecovered !== false) {
+    Array.prototype.push.apply(out, listRecoveredPartUsageRows_({limit:Math.max(limit, 500)}));
+  }
+  out.sort(compareUsageRowsNewest_);
+  return { success: true, rows: out.slice(0, limit) };
 }
 
 // Read-after-write confirmation for a request whose HTTP acknowledgement was
@@ -1766,6 +1788,66 @@ function recoverySheet_() {
 function recoveryDate_(value) {
   var millis = Number(value);
   return isFinite(millis) && millis > 0 ? new Date(millis) : '';
+}
+
+function usageOutputValue_(value) {
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function usageRowTime_(row) {
+  var value = row && row.Timestamp;
+  var time = value instanceof Date ? value.getTime() : Date.parse(String(value || ''));
+  return isFinite(time) ? time : 0;
+}
+
+function compareUsageRowsNewest_(a, b) {
+  return usageRowTime_(b) - usageRowTime_(a);
+}
+
+function recoveredUsageRowObject_(values, rowNum) {
+  var timestamp = values[2] || values[1] || values[0] || '';
+  return {
+    Timestamp:usageOutputValue_(timestamp),
+    OrderId:usageOutputValue_(values[3]),
+    Type:usageOutputValue_(values[4]),
+    Customer:usageOutputValue_(values[5]),
+    MachineNo:usageOutputValue_(values[6]),
+    MachineType:usageOutputValue_(values[7]),
+    ArticleNo:usageOutputValue_(values[8]),
+    PartName:usageOutputValue_(values[9]),
+    Qty:usageOutputValue_(values[10]),
+    Unit:usageOutputValue_(values[11]),
+    Note:usageOutputValue_(values[12]),
+    SetName:usageOutputValue_(values[13]),
+    RecordedBy:usageOutputValue_(values[14]) || '-',
+    EventId:usageOutputValue_(values[15]),
+    Revision:'Recovered',
+    Action:'draft_recovery',
+    RecoveredAt:usageOutputValue_(values[0]),
+    DraftCreatedAt:usageOutputValue_(values[1]),
+    DraftUpdatedAt:usageOutputValue_(values[2]),
+    Source:usageOutputValue_(values[16]) || 'local_draft',
+    _recovered:true,
+    _recoveryRow:rowNum
+  };
+}
+
+function listRecoveredPartUsageRows_(params) {
+  params = params || {};
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PARTUSAGE_RECOVERY_SHEET);
+  if (!sh || sh.getLastRow() < 2) return [];
+  var articleNo = String(params.articleNo || '').trim().toLowerCase();
+  var name = String(params.name || '').trim().toLowerCase();
+  var limit = Number(params.limit || 500);
+  var values = sh.getRange(2, 1, sh.getLastRow() - 1, PARTUSAGE_RECOVERY_HEADERS.length).getValues();
+  var out = [];
+  for (var i = values.length - 1; i >= 0 && out.length < limit; i--) {
+    var v = values[i];
+    if (articleNo && String(v[8]).trim().toLowerCase() !== articleNo) continue;
+    if (!articleNo && name && String(v[9]).trim().toLowerCase() !== name) continue;
+    out.push(recoveredUsageRowObject_(v, i + 2));
+  }
+  return out;
 }
 
 function recoverPartUsageDrafts(params) {
