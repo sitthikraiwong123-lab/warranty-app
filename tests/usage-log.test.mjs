@@ -496,9 +496,9 @@ test('online PartUsage outbox can be replayed by another device', () => {
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.21"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.21'/);
-  assert.match(worker, /schmoll-export-v28/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.22"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.22'/);
+  assert.match(worker, /schmoll-export-v29/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -655,8 +655,10 @@ test('database, pending queue, log, and Excel export preserve multiple part phot
     'pending-queue fallback should use machine/customer context to avoid borrowing photos from another order');
   assert.match(html, /function usageLegacyNameMatches\(candidate,\s*query\)/,
     'legacy rows with codeless or shortened part names should recover photos by a guarded unique prefix match');
-  assert.match(html, /usageLegacyNameMatches\(partName,\s*name\)/,
-    'master DB fallback should use the same guarded legacy name matcher, not only exact text equality');
+  assert.match(html, /function usageLegacySearchTexts\(row\)/,
+    'legacy image recovery must search part aliases/search fields, not only the main Description column');
+  assert.match(html, /usageLegacySearchTexts\(p\)\.some\(candidate=>usageLegacyNameMatches\(candidate,\s*name\)\)/,
+    'master DB fallback should match unique alias/search text such as Eaton PKZM0-16, not only exact Description text');
 });
 
 test('pending DB queue can add multiple photos at once', () => {
