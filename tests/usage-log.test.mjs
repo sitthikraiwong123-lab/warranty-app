@@ -496,9 +496,9 @@ test('online PartUsage outbox can be replayed by another device', () => {
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.19"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.19'/);
-  assert.match(worker, /schmoll-export-v26/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.20"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.20'/);
+  assert.match(worker, /schmoll-export-v27/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -651,6 +651,10 @@ test('database, pending queue, log, and Excel export preserve multiple part phot
     'fallback by part name must only be used when it resolves to one unambiguous photo source');
   assert.match(html, /rowMachineCustomerMatches\(row,\s*p\)/,
     'pending-queue fallback should use machine/customer context to avoid borrowing photos from another order');
+  assert.match(html, /function usageLegacyNameMatches\(candidate,\s*query\)/,
+    'legacy rows with codeless or shortened part names should recover photos by a guarded unique prefix match');
+  assert.match(html, /usageLegacyNameMatches\(partName,\s*name\)/,
+    'master DB fallback should use the same guarded legacy name matcher, not only exact text equality');
 });
 
 test('pending DB queue can add multiple photos at once', () => {
@@ -799,6 +803,12 @@ test('queued usage logs retry automatically without relying on an end-user butto
     'if IndexedDB/localStorage queueing fails mid-export, usage events need a final emergency copy instead of being reported as lost');
   assert.match(html, /state:'queued'[\s\S]{0,180}emergencyQueued:true/,
     'an emergency local copy should still be shown to the user as queued, not as permanently unsaved');
+  assert.match(html, /UsageLogCoreFallback/,
+    'the app must keep a built-in usage-log core fallback if the module file is stale or fails to load');
+  assert.match(html, /usageCoreSync\(\)\.usageStatusSuffix\(previewUsage\)/,
+    'PDF preview status must not depend on a possibly missing module global');
+  assert.match(html, /previewUsage\s*=\s*\{state:'failed',\s*error:logError\}/,
+    'PDF preview log failures must surface the real error in the toast');
   assert.match(backendSource, /const PARTUSAGE_OUTBOX_SHEET\s*=\s*'PartUsageOutbox'/,
     'usage events that cannot reach PartUsage should have an online queue sheet');
   assert.match(backendSource, /case 'queuePartUsageEvent'/,
