@@ -448,9 +448,9 @@ test('recovered draft usage is visible in history without mutating current PartU
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.15"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.15'/);
-  assert.match(worker, /schmoll-export-v22/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.16"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.16'/);
+  assert.match(worker, /schmoll-export-v23/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -654,6 +654,29 @@ test('part editor can append and delete multiple stored photos', () => {
     'long-pressing the center focus handle should be able to move the whole photo box');
   assert.match(html, /boxMoveActive[\s\S]{0,700}img\.x\s*=\s*toFrac\(nl,\s*rect\.width\)/,
     'the long-press focus-handle path must update the photo box x/y freely');
+});
+
+test('database and pending queues can filter/export parts by machine model usage', () => {
+  assert.match(html, /async function ensureDbPartMachineUsageIndex\(\)/,
+    'parts DB filtering must build a machine-model index from usage history');
+  assert.match(html, /const DB_PART_MACHINE_USAGE_LIMIT\s*=\s*2000/,
+    'the machine-model index should cover more than the visible log page while staying bounded for mobile performance');
+  assert.match(html, /lookupApiCall\('getAllPartUsage',\s*\{\s*limit:\s*DB_PART_MACHINE_USAGE_LIMIT,\s*includeRecovered:\s*false\s*\}\)/,
+    'the machine-model index should use current PartUsage rows, not recovered-only local draft data');
+  assert.match(html, /function dbPartMachineTypes\(part\)/,
+    'each master part needs derived machine types used by that Article/Part name');
+  assert.match(html, /pending:\s*\{\s*data:\(\)=>_pendingPartsCache\|\|pending,\s*fields:\['RequisitionName','MachineType','MachineNo','Customer'\]/,
+    'the pending DB tab must expose MachineType as a searchable/filterable field');
+  assert.match(html, /parts:\s*\{\s*data:\(\)=>partsWithMachineUsage\(lookupCache\.parts\),\s*fields:\['ArticleNo','Description','_MachineTypes'\]/,
+    'the parts DB tab must filter master parts by machine models they were used with');
+  assert.match(html, /groups:\(\)=>\[\s*\{\s*label:'รุ่นเครื่อง',\s*values:dbPartMachineTypeValues\(\)/,
+    'parts search dropdown should offer machine-model chips/groups');
+  assert.match(html, /_MachineTypes:dbPartMachineTypes\(row\)\.join\(' '\)/,
+    'parts export rows should keep the derived machine-model field so exports follow the active filter');
+  assert.match(html, /if\(dbActiveTab === 'pending'\)\{\s*const cfg = FILTER_CFG\.pending;[\s\S]{0,420}renderPendingTable\(filtered\)/,
+    'pending rows should be filtered before rendering so users can isolate one machine model');
+  assert.match(html, /if\(tab==='parts' \|\| tab==='pending'\)/,
+    'changing the machine-model filter should refresh the parts export batch count for parts and pending views');
 });
 
 test('queued usage logs retry automatically without relying on an end-user button', () => {
