@@ -434,9 +434,9 @@ test('recovered draft usage is visible in history without mutating current PartU
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.11"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.11'/);
-  assert.match(worker, /schmoll-export-v18/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.12"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.12'/);
+  assert.match(worker, /schmoll-export-v19/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -494,10 +494,20 @@ test('pdf photo layout supports multi-photo items and optional extra photo pages
     'orders need a switch to disable automatic extra photo pages');
   assert.match(html, /function renderPhotoTableHtml\(photoSlots,\s*opts\)/,
     'the original 4-box photo table must be reusable on later pages');
+  assert.match(html, /function chunkPhotoSlots\(slots,\s*size\)/,
+    'photo chunking must support 4 slots on page 1 and 8 slots on later pages');
+  assert.match(html, /firstPhotoPage\s*=\s*photoSlotsForPdf\.slice\(0,\s*4\)/,
+    'page 1 keeps the original four photo boxes below the order form');
+  assert.match(html, /extraPhotoPages\s*=\s*chunkPhotoSlots\(photoSlotsForPdf\.slice\(4\),\s*8\)/,
+    'page 2 onwards must continue with eight photos per page');
   assert.match(html, /class="pdoc pdoc-photo-extra"/,
     'extra photo pages should be lightweight photo-only pages, not repeat the full form header');
-  assert.match(html, /renderPhotoTableHtml\(slots,\s*\{showTitle:false\}\)/,
-    'extra photo pages should add the next four boxes without repeating a title row');
+  assert.match(html, /renderExtraPhotoPageHtml\(slots,\s*pageIndex\)/,
+    'extra photo pages need a dedicated 8-photo layout');
+  assert.match(html, /renderPhotoTableHtml\(slots\.slice\(0,\s*4\),\s*\{showTitle:true\}\)/,
+    'the first extra photo page section should still show the Photo heading');
+  assert.match(html, /renderPhotoTableHtml\(slots\.slice\(4,\s*8\),\s*\{showTitle:false\}\)/,
+    'the lower half of each extra page should continue the next four boxes without a duplicate heading');
   assert.match(html, /root\.querySelectorAll\('\.pdoc'\)/,
     'PDF generation must render every generated page, not just the first .pdoc');
   assert.match(html, /doc\.addPage\(\)/,
@@ -545,6 +555,17 @@ test('database, pending queue, log, and Excel export preserve multiple part phot
     'pending parts queue must store multiple image URLs too');
 });
 
+test('pending DB queue can add multiple photos at once', () => {
+  assert.match(html, /class="pend-img-input"[^>]*multiple/,
+    'pending queue thumbnails must accept multiple selected photos');
+  assert.match(html, /class="rp-img-input"[^>]*multiple/,
+    'resolve-pending modal must accept multiple selected photos');
+  assert.match(html, /for\(const f of files\)[\s\S]{0,900}addPendingPart/,
+    'pending queue upload must append every selected file to ImageURLs');
+  assert.match(html, /imageUrls = imageUrlList\(imageUrls\.concat\(uploadedUrls\)\)/,
+    'resolve-pending modal must merge all uploaded photo URLs');
+});
+
 test('part autocomplete ignores image metadata and supports rich part-name fields', () => {
   assert.match(html, /const NON_SEARCH_COLS\s*=\s*\/\^\(imageurl\|imageurls\|image_url\|image_urls\|image url\|image urls\)\$\/i/,
     'search suggestions must ignore both legacy ImageURL and multi-photo ImageURLs metadata');
@@ -554,6 +575,12 @@ test('part autocomplete ignores image metadata and supports rich part-name field
     'generic dropdowns must not assume every field exposes .value');
   assert.match(html, /renderPartSuggestions\(ac,\s*idx,\s*fieldTextValue\(el\)\)/,
     'Part Name focus should use the rich-field text content when showing suggestions');
+  assert.match(html, /async function ensurePartSuggestionsReady\(\)/,
+    'part suggestions should warm the lookup cache when the user opens the combo before sync finishes');
+  assert.match(html, /ensurePartSuggestionsReady\(\)\.then\(\(\)=>renderPartSuggestions\(ac,\s*idx,\s*fieldTextValue\(el\)\)\)/,
+    'Part Name focus should re-render suggestions after a late cache warm-up');
+  assert.match(html, /ensurePartSuggestionsReady\(\)\.then\(\(\)=>renderPartSuggestions\(ac,\s*idx,\s*fieldTextValue\(el\)\)\)/,
+    'Article/Part combos should not stay empty just because the cache was initially empty');
   assert.doesNotMatch(html, /k === 'Description' \|\| k === 'ArticleNo'\) continue;\s*if\(NON_SEARCH_COLS/,
     'alias matching must skip non-search image fields before treating them as predict words');
 });
@@ -581,9 +608,17 @@ test('part editor can append and delete multiple stored photos', () => {
     'backend updatePart must compare the old multi-photo list');
   assert.match(backendSource, /removedImageUrls\.forEach\(function \(url\) \{ trashDriveImage_\(url\); \}\)/,
     'backend should trash Drive files removed from the multi-photo list');
+  assert.match(html, /class="item-photo-img"[\s\S]{0,140}object-fit:contain/,
+    'order photo editor must keep auto-fit contain inline so images do not stretch');
 });
 
 test('queued usage logs retry automatically without relying on an end-user button', () => {
+  assert.match(html, /const LOOKUP_API_TIMEOUT_MS\s*=\s*20000/,
+    'ordinary API calls such as Log loading must have a timeout so the UI cannot stay loading forever');
+  assert.match(html, /if\(ownsController\)\s*init\.signal\s*=\s*controller\.signal/,
+    'lookupApiCall should attach its own timeout signal when the caller did not provide one');
+  assert.match(html, /lookupApiCall\('getAllPartUsage'[\s\S]{0,180}includeRecovered:\s*false/,
+    'full Log loading must retry current PartUsage rows if the recovery merge fails');
   assert.match(html, /const USAGE_OUTBOX_RETRY_DELAYS_MS\s*=\s*\[5000,\s*15000,\s*60000,\s*300000\]/,
     'automatic retries must back off instead of polling the backend continuously');
   assert.match(html, /async function flushUsageOutboxAutomatically\(\)/,
