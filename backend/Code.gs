@@ -1118,6 +1118,7 @@ function updatePart(params) {
 
   if (params.imageURL !== undefined) {
     const oldImageUrl = imgHeader ? String(oldData[imgHeader] || '') : '';
+    var oldImageUrls = mergeImageUrls_((imgsHeader ? oldData[imgsHeader] : ''), oldImageUrl);
     const newImageUrl = String(params.imageURL);
     const newImageUrls = imageUrlList_(params.imageURLs).concat(imageUrlList_(newImageUrl));
     let imgCol = info.imageCol;
@@ -1127,9 +1128,15 @@ function updatePart(params) {
     info.sheet.getRange(rowNum, imgCol + 1).setValue(newImageUrls[0] || newImageUrl);
     info.sheet.getRange(rowNum, imgsCol2 + 1).setValue(imageUrlsField_(newImageUrls));
     newImageUrls.forEach(function (u) { ensureImageShared_(u); }); // make it viewable in <img> tags
+    var newUrlKeys = {};
+    newImageUrls.forEach(function (url) { newUrlKeys[String(url || '').toLowerCase()] = true; });
+    var removedImageUrls = oldImageUrls.filter(function (url) {
+      return url && !newUrlKeys[String(url || '').toLowerCase()];
+    });
+    removedImageUrls.forEach(function (url) { trashDriveImage_(url); });
     // Orphan cleanup: if the image actually changed to a different Drive file
     // (or was cleared), trash the previous one so it doesn't linger forever.
-    if (oldImageUrl && driveIdFromUrl_(oldImageUrl) && driveIdFromUrl_(oldImageUrl) !== driveIdFromUrl_(newImageUrls[0] || newImageUrl)) {
+    if (!removedImageUrls.length && oldImageUrl && driveIdFromUrl_(oldImageUrl) && driveIdFromUrl_(oldImageUrl) !== driveIdFromUrl_(newImageUrls[0] || newImageUrl)) {
       trashDriveImage_(oldImageUrl);
     }
   }
@@ -1163,10 +1170,13 @@ function updatePart(params) {
 
   // Echo the stored image path back so the caller can confirm/rebind without
   // waiting for the next sync.
+  const finalImageUrls = (params.imageURL !== undefined)
+    ? imageUrlList_(params.imageURLs).concat(imageUrlList_(params.imageURL))
+    : (imgsHeader ? imageUrlList_(oldData[imgsHeader]).concat(imageUrlList_(imgHeader ? oldData[imgHeader] : '')) : imageUrlList_(imgHeader ? oldData[imgHeader] : ''));
   const finalImageURL = (params.imageURL !== undefined)
-    ? String(params.imageURL)
+    ? (finalImageUrls[0] || '')
     : (imgHeader ? String(oldData[imgHeader] || '') : '');
-  return { success: true, articleNo: newArticleNo, imageURL: finalImageURL };
+  return { success: true, articleNo: newArticleNo, imageURL: finalImageURL, imageURLs: finalImageUrls };
 }
 
 function updateMachine(params) {
@@ -1440,7 +1450,7 @@ function usageText_(value, maxLength) {
 function apiInfo() {
   return {
     success: true,
-    appVersion: '2.12.10',
+    appVersion: '2.12.11',
     usageLogVersion: 3,
     usageCapabilities: ['append-events', 'idempotent-event-id', 'confirm-event', 'draft-recovery']
   };

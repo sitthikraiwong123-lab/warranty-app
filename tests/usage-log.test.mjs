@@ -421,16 +421,22 @@ test('recovered draft usage is visible in history without mutating current PartU
 
   assert.match(html, /getAllPartUsage'[\s\S]{0,80}includeRecovered:\s*true/,
     'full log modal must explicitly request recovered draft rows');
+  assert.match(html, /getAllPartUsage'[\s\S]{0,80}includeRecovered:\s*false/,
+    'full log modal must fall back to the current ledger if recovered rows fail to merge');
   assert.match(html, /getPartUsage'[\s\S]{0,80}includeRecovered:\s*true/,
     'per-part usage modal must explicitly request recovered draft rows');
+  assert.match(html, /getPartUsage'[\s\S]{0,80}includeRecovered:\s*false/,
+    'per-part usage modal must still load current history if recovered rows fail to merge');
+  assert.match(html, /usage recovery merge failed, retrying current ledger only/,
+    'recovery merge failures should not blank the whole usage log');
   assert.match(html, /!r\._recovered[\s\S]{0,120}lt-edit/,
     'recovered rows should be visible but not editable/deletable as PartUsage rows');
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.10"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.10'/);
-  assert.match(worker, /schmoll-export-v17/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.11"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.11'/);
+  assert.match(worker, /schmoll-export-v18/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -537,6 +543,44 @@ test('database, pending queue, log, and Excel export preserve multiple part phot
     'setImageURL should append new Drive URLs instead of replacing previous photos');
   assert.match(backendSource, /PENDINGPARTS_HEADERS[\s\S]*'ImageURLs'/,
     'pending parts queue must store multiple image URLs too');
+});
+
+test('part autocomplete ignores image metadata and supports rich part-name fields', () => {
+  assert.match(html, /const NON_SEARCH_COLS\s*=\s*\/\^\(imageurl\|imageurls\|image_url\|image_urls\|image url\|image urls\)\$\/i/,
+    'search suggestions must ignore both legacy ImageURL and multi-photo ImageURLs metadata');
+  assert.match(html, /function fieldTextValue\(el\)/,
+    'autocomplete needs one reader that works for input and contenteditable fields');
+  assert.match(html, /renderValueSuggestions[\s\S]{0,180}fieldTextValue\(inputEl\)/,
+    'generic dropdowns must not assume every field exposes .value');
+  assert.match(html, /renderPartSuggestions\(ac,\s*idx,\s*fieldTextValue\(el\)\)/,
+    'Part Name focus should use the rich-field text content when showing suggestions');
+  assert.doesNotMatch(html, /k === 'Description' \|\| k === 'ArticleNo'\) continue;\s*if\(NON_SEARCH_COLS/,
+    'alias matching must skip non-search image fields before treating them as predict words');
+});
+
+test('part editor can append and delete multiple stored photos', () => {
+  assert.match(html, /let imageUrls\s*=\s*imageUrlList\(part\)/,
+    'edit modal must start from the complete stored image list');
+  assert.match(html, /let pendingImages\s*=\s*\[\]/,
+    'edit modal must queue multiple new photos before save');
+  assert.match(html, /class="epm-img-input"[^>]*multiple/,
+    'edit modal file picker must accept multiple files');
+  assert.match(html, /epm-img-grid/,
+    'edit modal must render a grid/list of all current and newly added photos');
+  assert.match(html, /epm-img-del[^}]+data-kind="existing"/,
+    'edit modal must allow deleting one existing stored photo without clearing every photo');
+  assert.match(html, /epm-img-del[^}]+data-kind="pending"/,
+    'edit modal must allow deleting one newly-added pending photo before save');
+  assert.match(html, /for\(const pending of pendingImages\)/,
+    'save must upload every newly-added image');
+  assert.match(html, /payload\.imageURLs\s*=\s*finalImageUrls/,
+    'updatePart must receive the full final image list');
+  assert.match(html, /applyImageUrlsToRecord\(part,\s*finalImageUrls\)/,
+    'local database view must immediately reflect append/delete image changes');
+  assert.match(backendSource, /var oldImageUrls\s*=\s*mergeImageUrls_/,
+    'backend updatePart must compare the old multi-photo list');
+  assert.match(backendSource, /removedImageUrls\.forEach\(function \(url\) \{ trashDriveImage_\(url\); \}\)/,
+    'backend should trash Drive files removed from the multi-photo list');
 });
 
 test('queued usage logs retry automatically without relying on an end-user button', () => {
