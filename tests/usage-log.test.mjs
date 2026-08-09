@@ -434,9 +434,9 @@ test('recovered draft usage is visible in history without mutating current PartU
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.12"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.12'/);
-  assert.match(worker, /schmoll-export-v19/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.13"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.13'/);
+  assert.match(worker, /schmoll-export-v20/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -573,13 +573,19 @@ test('part autocomplete ignores image metadata and supports rich part-name field
     'autocomplete needs one reader that works for input and contenteditable fields');
   assert.match(html, /renderValueSuggestions[\s\S]{0,180}fieldTextValue\(inputEl\)/,
     'generic dropdowns must not assume every field exposes .value');
-  assert.match(html, /renderPartSuggestions\(ac,\s*idx,\s*fieldTextValue\(el\)\)/,
+  assert.match(html, /openPartSuggestions\(ac,\s*idx,\s*\(\)=>fieldTextValue\(el\)\)/,
     'Part Name focus should use the rich-field text content when showing suggestions');
   assert.match(html, /async function ensurePartSuggestionsReady\(\)/,
     'part suggestions should warm the lookup cache when the user opens the combo before sync finishes');
-  assert.match(html, /ensurePartSuggestionsReady\(\)\.then\(\(\)=>renderPartSuggestions\(ac,\s*idx,\s*fieldTextValue\(el\)\)\)/,
+  assert.match(html, /function showPartSuggestionsLoading\(ac\)/,
+    'Article / Part Name combos should show a visible dropdown while the parts cache is warming');
+  assert.match(html, /กำลังโหลดรายการอะไหล่/,
+    'the parts combo must not disappear silently when the cache is still empty');
+  assert.match(html, /function openPartSuggestions\(ac,\s*idx,\s*getQuery\)/,
+    'Article and Part Name focus handlers need a shared warm-and-rerender path');
+  assert.match(html, /openPartSuggestions\(ac,\s*idx,\s*\(\)=>fieldTextValue\(el\)\)/,
     'Part Name focus should re-render suggestions after a late cache warm-up');
-  assert.match(html, /ensurePartSuggestionsReady\(\)\.then\(\(\)=>renderPartSuggestions\(ac,\s*idx,\s*fieldTextValue\(el\)\)\)/,
+  assert.match(html, /openPartSuggestions\(ac,\s*idx,\s*\(\)=>fieldTextValue\(el\)\)/,
     'Article/Part combos should not stay empty just because the cache was initially empty');
   assert.doesNotMatch(html, /k === 'Description' \|\| k === 'ArticleNo'\) continue;\s*if\(NON_SEARCH_COLS/,
     'alias matching must skip non-search image fields before treating them as predict words');
@@ -610,6 +616,10 @@ test('part editor can append and delete multiple stored photos', () => {
     'backend should trash Drive files removed from the multi-photo list');
   assert.match(html, /class="item-photo-img"[\s\S]{0,140}object-fit:contain/,
     'order photo editor must keep auto-fit contain inline so images do not stretch');
+  assert.match(html, /function naturalContainBox\(img,\s*boxRatio\)/,
+    'photo rendering must calculate natural-aspect fit boxes instead of stretching images to the cell shape');
+  assert.match(html, /aspect:\s*w\s*\/\s*h/,
+    'newly-added photos must remember their real aspect ratio for editor/PDF rendering');
 });
 
 test('queued usage logs retry automatically without relying on an end-user button', () => {
@@ -618,7 +628,9 @@ test('queued usage logs retry automatically without relying on an end-user butto
   assert.match(html, /if\(ownsController\)\s*init\.signal\s*=\s*controller\.signal/,
     'lookupApiCall should attach its own timeout signal when the caller did not provide one');
   assert.match(html, /lookupApiCall\('getAllPartUsage'[\s\S]{0,180}includeRecovered:\s*false/,
-    'full Log loading must retry current PartUsage rows if the recovery merge fails');
+    'full Log loading must load current PartUsage rows first so the modal never waits on recovery merge');
+  assert.match(html, /loadRecoveredUsageRowsInBackground/,
+    'recovered rows should be a background enhancement after current logs are visible');
   assert.match(html, /const USAGE_OUTBOX_RETRY_DELAYS_MS\s*=\s*\[5000,\s*15000,\s*60000,\s*300000\]/,
     'automatic retries must back off instead of polling the backend continuously');
   assert.match(html, /async function flushUsageOutboxAutomatically\(\)/,
