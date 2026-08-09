@@ -91,12 +91,25 @@ export function buildDraftRecoveryBatch(drafts, options = {}) {
   };
 }
 
+export function buildDraftRecoveryBatches(drafts, options = {}) {
+  if (!Array.isArray(drafts)) throw new Error('Drafts must be an array');
+  const batches = [];
+  for (let index = 0; index < drafts.length; index += 10) {
+    const batch = buildDraftRecoveryBatch(drafts.slice(index, index + 10), options);
+    if (batch.drafts.length) batches.push(batch);
+  }
+  return batches;
+}
+
 export function validateUsageAck(response, event) {
   if (!event || !event.eventId) throw new Error('Usage event required');
   const expectedItems = Number(event.expectedItems) || 0;
   if (response && response.queued === true) {
     if (response.eventId && response.eventId !== event.eventId) throw new Error('Usage event acknowledgement mismatch');
-    return { state:'queued', eventId:event.eventId, written:0, expectedItems, revision:null };
+    return {
+      state:'queued', eventId:event.eventId, written:0, expectedItems, revision:null,
+      error:text(response.error).trim()
+    };
   }
   if (!response || response.success !== true) throw new Error('Usage log was not acknowledged');
   if (response.eventId !== event.eventId) throw new Error('Usage event acknowledgement mismatch');
@@ -115,7 +128,8 @@ export function usageStatusSuffix(result) {
   if (!result) return '';
   if (result.state === 'failed') return ' · ⚠ Log ยังไม่ถูกบันทึก';
   return result.state === 'queued'
-    ? ' · Log รอซิงค์ (' + result.expectedItems + ' รายการ)'
+    ? ' · Log รอซิงค์ (' + result.expectedItems + ' รายการ)' +
+      (result.error ? ' — ' + text(result.error).slice(0, 160) : '')
     : ' · Log บันทึกแล้ว ' + result.written + '/' + result.expectedItems;
 }
 
@@ -124,6 +138,7 @@ globalThis.UsageLogCore = Object.freeze({
   createUsageEventId,
   buildUsageEvent,
   buildDraftRecoveryBatch,
+  buildDraftRecoveryBatches,
   validateUsageAck,
   usageStatusSuffix
 });
