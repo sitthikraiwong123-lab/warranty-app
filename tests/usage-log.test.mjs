@@ -392,9 +392,9 @@ test('draft recovery writes only missing rows to a separate idempotent sheet', (
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.6"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.6'/);
-  assert.match(worker, /schmoll-export-v13/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.7"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.7'/);
+  assert.match(worker, /schmoll-export-v14/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -435,6 +435,27 @@ test('pdf ready card does not expose duplicate open or download controls', () =>
   assert.doesNotMatch(html, /document\.getElementById\('btnDownloadPdf'\)/);
   assert.match(html, /id="pmSavePdf"/,
     'the PDF preview menu still needs its save/download action');
+});
+
+test('pdf photo layout supports multi-photo items and optional extra photo pages', () => {
+  assert.match(html, /function collectOrderPhotoSlots\(ord\)/,
+    'PDF export needs to flatten every item photo into ordered photo slots');
+  assert.match(html, /packPhotosTwoPerBox/,
+    'each item needs an opt-in flag for combining two photos in one PDF box');
+  assert.match(html, /autoExtraPhotoPages/,
+    'orders need a switch to disable automatic extra photo pages');
+  assert.match(html, /function renderPhotoTableHtml\(photoSlots\)/,
+    'the original 4-box photo table must be reusable on later pages');
+  assert.match(html, /root\.querySelectorAll\('\.pdoc'\)/,
+    'PDF generation must render every generated page, not just the first .pdoc');
+  assert.match(html, /doc\.addPage\(\)/,
+    'multi-page photo output must add jsPDF pages after the first');
+  assert.match(html, /id="extraPhotoPagesControl"/,
+    'Main Info must expose the auto-extra-pages toggle only when it matters');
+  assert.match(html, /itemPhotoPack/,
+    'each item row needs its own combine-two-photos checkbox');
+  assert.doesNotMatch(html, /slice\(0,4\)/,
+    'photo export must not silently drop photos at the old four-photo cap');
 });
 
 test('queued usage logs retry automatically without relying on an end-user button', () => {
