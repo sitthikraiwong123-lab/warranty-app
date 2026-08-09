@@ -496,9 +496,9 @@ test('online PartUsage outbox can be replayed by another device', () => {
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.20"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.20'/);
-  assert.match(worker, /schmoll-export-v27/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.21"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.21'/);
+  assert.match(worker, /schmoll-export-v28/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -643,6 +643,8 @@ test('database, pending queue, log, and Excel export preserve multiple part phot
     'PartUsage log rows must store image snapshots instead of relying on later DB lookup guesses');
   assert.match(html, /function usageOrderSnapshotForLog\(sourceOrder\)/,
     'usage events should snapshot the photo URLs currently attached to each order item');
+  assert.match(html, /typeof findPart\s*===\s*'function'\s*\?\s*findPart\(img\.fromDbArticle\)\s*:\s*null/,
+    'log photo snapshotting must not fail the whole usage event when DB helper findPart is unavailable');
   assert.match(html, /const direct\s*=\s*imageUrlList\(row\);\s*if\(direct\.length\) return direct;/,
     'new log rows with ImageURLs must prefer the immutable snapshot saved with the log row');
   assert.match(html, /function uniqueUsageFallbackImageMatch\(rows,\s*predicate\)/,
