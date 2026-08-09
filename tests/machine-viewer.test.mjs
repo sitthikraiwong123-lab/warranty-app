@@ -18,7 +18,7 @@ const workerUrl = new URL('../sw.js', import.meta.url);
 const html = fs.readFileSync(appUrl, 'utf8');
 const viewer = fs.readFileSync(viewerUrl, 'utf8');
 const worker = fs.readFileSync(workerUrl, 'utf8');
-assert.match(html, /v2\.12\.3 · 09-Aug-2026/);
+assert.match(html, /v2\.12\.4 · 09-Aug-2026/);
 
 // The 3D feature is Power User-only. Its heavyweight renderer is loaded only
 // when an authenticated operator opens it.
@@ -133,7 +133,7 @@ assert.doesNotMatch(viewer, /mxy-common-bed[^\n]*station-3-table/,
   'the shared bed must not incorrectly select station 3');
 const shell = worker.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] || '';
 assert.doesNotMatch(shell, /machine-viewer|vendor\/three|OrbitControls/);
-assert.match(worker, /const CACHE = 'schmoll-export-v10'/);
+assert.match(worker, /const CACHE = 'schmoll-export-v11'/);
 assert.match(worker, /url\.origin === self\.location\.origin[\s\S]{0,200}c\.put\(req, copy\)/,
   'same-origin 3D assets are cached lazily after first use');
 
@@ -147,7 +147,7 @@ assert.match(html, /lookupSyncApiCall\(action,\s*\{since:\s*lookupCache\.syncedA
 // Script serve settings, outbox and pending-part requests at the same time.
 // Cached settings are still applied immediately without a network call.
 assert.match(html, /loadAppSettings\(\{cacheOnly:true\}\)/);
-assert.match(html, /async function lookupStartupSync\(\)[\s\S]{0,900}await lookupSync\(\)[\s\S]{0,500}Promise\.allSettled\(\[lookupFlushOutbox\(\),\s*loadAppSettings\(\)\]\)/);
+assert.match(html, /async function lookupStartupSync\(\)[\s\S]{0,900}await lookupSync\(\)[\s\S]{0,700}Promise\.allSettled\(\[\s*lookupFlushOutbox\(\{excludeUsage:true\}\),\s*flushUsageOutboxAutomatically\(\),\s*loadAppSettings\(\)\s*\]\)/);
 assert.match(html, /if\(lookupOnline\) lookupStartupSync\(\)/);
 const initLookup = html.match(/\(async function initLookupDb\(\)\{([\s\S]*?)\}\)\(\);/)?.[1] || '';
 assert.doesNotMatch(initLookup, /_loadPendingParts|lookupFlushOutbox|loadAppSettings/,
