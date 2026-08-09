@@ -1,0 +1,96 @@
+export const USAGE_ACTIONS = Object.freeze([
+  'save',
+  'pdf_preview',
+  'download',
+  'share',
+  'email_share',
+  'email_graph',
+  'email_deeplink',
+  'auto_email',
+  'legacy_export'
+]);
+
+const actionSet = new Set(USAGE_ACTIONS);
+
+function text(value) {
+  return String(value == null ? '' : value);
+}
+
+export function createUsageEventId() {
+  const cryptoObject = globalThis.crypto;
+  if (cryptoObject && typeof cryptoObject.randomUUID === 'function') {
+    return cryptoObject.randomUUID();
+  }
+  return 'usage-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+}
+
+export function buildUsageEvent(order, options = {}) {
+  if (!order || !text(order.id).trim()) throw new Error('orderId required');
+  const action = text(options.action || '').trim();
+  if (!actionSet.has(action)) throw new Error('Invalid usage action: ' + action);
+
+  const items = (Array.isArray(order.items) ? order.items : [])
+    .filter(item => item && (text(item.articleNo).trim() || text(item.description).trim()))
+    .map(item => ({
+      articleNo: text(item.articleNo).trim(),
+      partName: text(item.description),
+      machineNo: text(item.machineNo),
+      machineType: text(item.machineType),
+      qty: item.qty === '' || item.qty == null ? '' : item.qty,
+      unit: text(item.qtyUnit),
+      note: text(item.itemDesc),
+      setName: text(item.setName)
+    }));
+
+  return {
+    orderId: text(order.id).trim(),
+    eventId: text(options.eventId || createUsageEventId()).trim(),
+    action,
+    eventCreatedAt: text(options.createdAt || new Date().toISOString()),
+    type: text(order.type),
+    customer: text(order.customer),
+    recordedBy: text(options.recordedBy || '(unknown)').trim() || '(unknown)',
+    expectedItems: items.length,
+    items
+  };
+}
+
+export function validateUsageAck(response, event) {
+  if (!event || !event.eventId) throw new Error('Usage event required');
+  const expectedItems = Number(event.expectedItems) || 0;
+  if (response && response.queued === true) {
+    if (response.eventId && response.eventId !== event.eventId) throw new Error('Usage event acknowledgement mismatch');
+    return { state:'queued', eventId:event.eventId, written:0, expectedItems, revision:null };
+  }
+  if (!response || response.success !== true) throw new Error('Usage log was not acknowledged');
+  if (response.eventId !== event.eventId) throw new Error('Usage event acknowledgement mismatch');
+  const written = Number(response.written);
+  if (written !== expectedItems) throw new Error(`Usage log incomplete: ${written}/${expectedItems}`);
+  return {
+    state:'saved',
+    eventId:event.eventId,
+    written,
+    expectedItems,
+    revision:Number(response.revision) || null
+  };
+}
+
+export function usageStatusSuffix(result) {
+  if (!result) return '';
+  if (result.state === 'failed') return ' · ⚠ Log ยังไม่ถูกบันทึก';
+  return result.state === 'queued'
+    ? ' · Log รอซิงค์ (' + result.expectedItems + ' รายการ)'
+    : ' · Log บันทึกแล้ว ' + result.written + '/' + result.expectedItems;
+}
+
+globalThis.UsageLogCore = Object.freeze({
+  USAGE_ACTIONS,
+  createUsageEventId,
+  buildUsageEvent,
+  validateUsageAck,
+  usageStatusSuffix
+});
+
+if (typeof globalThis.dispatchEvent === 'function' && typeof globalThis.Event === 'function') {
+  globalThis.dispatchEvent(new globalThis.Event('usage-log-core-ready'));
+}
