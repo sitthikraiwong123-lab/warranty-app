@@ -297,9 +297,9 @@ test('draft recovery writes only missing rows to a separate idempotent sheet', (
 });
 
 test('every user-visible order action is wired to an append-only usage event', () => {
-  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.3"><\/script>/);
-  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.3'/);
-  assert.match(worker, /schmoll-export-v10/,
+  assert.match(html, /<script type="module" src="\.\/usage-log-core\.mjs\?v=2\.12\.4"><\/script>/);
+  assert.match(worker, /'\.\/usage-log-core\.mjs\?v=2\.12\.4'/);
+  assert.match(worker, /schmoll-export-v11/,
     'service worker cache must be bumped so clients receive the new logging module');
   assert.match(html, /usageAction[\s\S]{0,160}: 'save'/,
     'ordinary saves default to a save usage event');
@@ -328,4 +328,23 @@ test('every user-visible order action is wired to an append-only usage event', (
   assert.match(html, /ซิงค์ Log ที่รอ/);
   assert.match(html, /usageLogVersion/);
   assert.match(html, /PartUsageRecovery/);
+});
+
+test('queued usage logs retry automatically without relying on an end-user button', () => {
+  assert.match(html, /const USAGE_OUTBOX_RETRY_DELAYS_MS\s*=\s*\[5000,\s*15000,\s*60000,\s*300000\]/,
+    'automatic retries must back off instead of polling the backend continuously');
+  assert.match(html, /async function flushUsageOutboxAutomatically\(\)/,
+    'usage outbox needs a dedicated guarded automatic flush');
+  assert.match(html, /lookupFlushOutbox\(\{usageOnly:true\}\)/,
+    'automatic replay must only operate on queued usage events');
+  assert.match(html, /outboxAdd\(\{action:'recordPartUsage'[\s\S]{0,500}scheduleUsageOutboxRetry\(\)/,
+    'a newly queued usage event must schedule its own retry');
+  assert.match(html, /document\.addEventListener\('visibilitychange'[\s\S]{0,300}flushUsageOutboxAutomatically\(\)/,
+    'returning to the app must retry queued usage immediately');
+  assert.match(html, /window\.addEventListener\('focus'[\s\S]{0,250}flushUsageOutboxAutomatically\(\)/,
+    'focusing the app must retry queued usage immediately');
+  assert.match(html, /window\.addEventListener\('online'[\s\S]{0,300}lookupStartupSync\(\)/,
+    'network reconnection must run the startup sync pipeline');
+  assert.match(html, /isPowerUser\(\)\?'<button type="button" class="btn log-sync-pending"/,
+    'the manual diagnostic control must not be required or shown to ordinary users');
 });
