@@ -7966,14 +7966,10 @@ async function exportPdf(){
       try{ card.scrollIntoView({ behavior:'smooth', block:'start' }); } catch(e){}
     }
     openPdfPreview();
-    let previewUsage;
-    try{
-      previewUsage = await recordOrderPartUsage('pdf_preview');
-    }catch(logError){
-      console.error('PDF preview usage log failed', logError);
-      previewUsage = {state:'failed', error:logError};
-    }
-    flashStatus('สร้าง PDF แล้ว' + usageCoreSync().usageStatusSuffix(previewUsage), 6000);
+    // Preview is only a preview — it no longer writes a usage revision. A real
+    // revision is recorded once, when the PDF is actually downloaded or shared
+    // (see commitPdfAction), so pressing preview no longer double-saves.
+    flashStatus('สร้าง PDF แล้ว', 4000);
   } catch(e){
     console.error('exportPdf failed', e);
     alert('Export PDF ไม่สำเร็จ: ' + (e && e.message ? e.message : e));
